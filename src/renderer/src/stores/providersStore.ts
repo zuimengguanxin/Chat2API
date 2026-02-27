@@ -4,6 +4,7 @@
  */
 
 import { create } from 'zustand'
+import { api } from '@/api'
 import type { 
   Provider, 
   Account, 
@@ -44,6 +45,10 @@ interface ProviderState {
   getProviderById: (id: string) => Provider | undefined
   getAccountById: (id: string) => Account | undefined
   getAccountsByProvider: (providerId: string) => Account[]
+  
+  fetchProviders: () => Promise<void>
+  fetchBuiltinProviders: () => Promise<void>
+  fetchAccounts: () => Promise<void>
 }
 
 export const useProvidersStore = create<ProviderState>((set, get) => ({
@@ -111,6 +116,35 @@ export const useProvidersStore = create<ProviderState>((set, get) => ({
   getProviderById: (id) => get().providers.find((p) => p.id === id),
   getAccountById: (id) => get().accounts.find((a) => a.id === id),
   getAccountsByProvider: (providerId) => get().accounts.filter((a) => a.providerId === providerId),
+  
+  fetchProviders: async () => {
+    set({ isLoading: true })
+    try {
+      const providers = await api.providers.getAll()
+      set({ providers, isLoading: false })
+    } catch (error) {
+      console.error('Failed to fetch providers:', error)
+      set({ isLoading: false })
+    }
+  },
+  
+  fetchBuiltinProviders: async () => {
+    try {
+      const builtinProviders = await api.providers.getBuiltin()
+      set({ builtinProviders })
+    } catch (error) {
+      console.error('Failed to fetch builtin providers:', error)
+    }
+  },
+  
+  fetchAccounts: async () => {
+    try {
+      const accounts = await api.accounts.getAll()
+      set({ accounts })
+    } catch (error) {
+      console.error('Failed to fetch accounts:', error)
+    }
+  },
 }))
 
 export default useProvidersStore

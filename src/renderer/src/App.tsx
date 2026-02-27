@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { Dashboard } from '@/pages/Dashboard'
 import { Providers } from '@/pages/Providers'
@@ -8,12 +8,14 @@ import ApiKeys from '@/pages/ApiKeys'
 import Logs from '@/pages/Logs'
 import { Settings } from '@/pages/Settings'
 import { About } from '@/pages/About'
+import { Login } from '@/pages/Login'
 import { Toaster } from '@/components/ui/toaster'
 
 function App() {
   return (
     <>
       <Routes>
+        <Route path="/login" element={<Login />} />
         <Route element={<MainLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/providers" element={<Providers />} />
@@ -24,6 +26,7 @@ function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <Toaster />
     </>

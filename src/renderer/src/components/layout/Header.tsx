@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import logoIcon from '@/assets/icons/icons.png'
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { api, wsClient } from '@/api'
 
 export function Header() {
   const { t } = useTranslation()
@@ -12,22 +13,20 @@ export function Header() {
   const { language, setLanguage } = useSettingsStore()
   const [proxyEnabled, setProxyEnabled] = useState(false)
   const [proxyLoading, setProxyLoading] = useState(false)
-  const [port, setPort] = useState(8080)
+  const [port, setPort] = useState(8310)
 
   useEffect(() => {
-    if (!window.electronAPI?.proxy?.onStatusChanged) return
-    
-    const unsubscribe = window.electronAPI.proxy.onStatusChanged((status) => {
+    api.proxy.getStatus().then((status) => {
+      setProxyEnabled(status.isRunning)
+      if (status.port) setPort(status.port)
+    }).catch(() => {})
+
+    const unsubscribe = wsClient.on('proxy:status', (status: any) => {
       setProxyEnabled(status.isRunning)
       if (status.port) setPort(status.port)
     })
-    
-    window.electronAPI.proxy.getStatus().then((status) => {
-      setProxyEnabled(status.isRunning)
-      if (status.port) setPort(status.port)
-    })
-    
-    return unsubscribe
+
+    return () => unsubscribe()
   }, [])
 
   const handleToggleProxy = async () => {
@@ -35,11 +34,14 @@ export function Header() {
     setProxyLoading(true)
     try {
       if (proxyEnabled) {
-        await window.electronAPI.proxy.stop()
+        await api.proxy.stop()
         setProxyEnabled(false)
       } else {
-        await window.electronAPI.proxy.start()
-        setProxyEnabled(true)
+        const result = await api.proxy.start()
+        if (result.success) {
+          setProxyEnabled(true)
+          setPort(result.port || 8310)
+        }
       }
     } finally {
       setProxyLoading(false)

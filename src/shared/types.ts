@@ -26,6 +26,12 @@ export interface CredentialField {
   helpText?: string
 }
 
+export interface BuiltinProviderConfig extends Omit<Provider, 'createdAt' | 'updatedAt'> {
+  credentialFields: CredentialField[]
+  tokenCheckEndpoint?: string
+  tokenCheckMethod?: 'GET' | 'POST'
+}
+
 export type LoadBalanceStrategy = 'round-robin' | 'fill-first' | 'failover'
 
 export type Theme = 'light' | 'dark' | 'system'

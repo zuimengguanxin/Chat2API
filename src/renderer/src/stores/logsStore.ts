@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { api, wsClient } from '@/api'
 import type { LogEntry, LogLevel } from '@/types/electron'
 
 interface LogFilter {
@@ -46,9 +47,12 @@ interface LogsState {
   setAutoScroll: (autoScroll: boolean) => void
   setHasMore: (hasMore: boolean) => void
   applyFilter: () => void
-  clearLogs: () => void
+  clearLogs: () => Promise<void>
   loadMore: () => Promise<void>
   refresh: () => Promise<void>
+  exportLogs: (format: 'json' | 'txt') => Promise<string>
+  fetchTrend: (days?: number) => Promise<void>
+  fetchAccountTrend: (accountId: string, days?: number) => Promise<void>
 }
 
 export const useLogsStore = create<LogsState>((set, get) => ({
@@ -88,12 +92,6 @@ export const useLogsStore = create<LogsState>((set, get) => ({
         shouldAdd = false
       }
       if (filter.keyword && !log.message.toLowerCase().includes(filter.keyword.toLowerCase())) {
-        shouldAdd = false
-      }
-      if (filter.startTime && log.timestamp < filter.startTime) {
-        shouldAdd = false
-      }
-      if (filter.endTime && log.timestamp > filter.endTime) {
         shouldAdd = false
       }
       
@@ -143,18 +141,11 @@ export const useLogsStore = create<LogsState>((set, get) => ({
       )
     }
 
-    if (filter.startTime) {
-      filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
-    }
-
-    if (filter.endTime) {
-      filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
-    }
-
     set({ filteredLogs: filtered })
   },
 
-  clearLogs: () => {
+  clearLogs: async () => {
+    await api.logs.clear()
     set({
       logs: [],
       filteredLogs: [],
@@ -167,16 +158,12 @@ export const useLogsStore = create<LogsState>((set, get) => ({
   loadMore: async () => {
     const { isLoading, hasMore, logs, pageSize } = get()
     if (isLoading || !hasMore) return
-    if (!window.electronAPI?.logs?.get) return
 
     set({ isLoading: true })
 
     try {
       const offset = logs.length
-      const newLogs = await window.electronAPI.logs.get({
-        limit: pageSize,
-        offset,
-      })
+      const newLogs = await api.logs.get({ limit: pageSize, offset })
 
       if (newLogs.length < pageSize) {
         set({ hasMore: false })
@@ -197,22 +184,15 @@ export const useLogsStore = create<LogsState>((set, get) => ({
     const { pageSize } = get()
     set({ isLoading: true })
 
-    if (!window.electronAPI?.logs) {
-      set({ isLoading: false })
-      return
-    }
-
     try {
-      const [logs, stats, trend] = await Promise.all([
-        window.electronAPI.logs.get({ limit: pageSize }),
-        window.electronAPI.logs.getStats(),
-        window.electronAPI.logs.getTrend(7),
+      const [logs, stats] = await Promise.all([
+        api.logs.get({ limit: pageSize }),
+        api.logs.getStats(),
       ])
 
       set({
         logs,
         stats,
-        trend,
         hasMore: logs.length >= pageSize,
       })
       get().applyFilter()
@@ -222,6 +202,33 @@ export const useLogsStore = create<LogsState>((set, get) => ({
       set({ isLoading: false })
     }
   },
+
+  exportLogs: async (format) => {
+    const result = await api.logs.export(format)
+    return result.data
+  },
+
+  fetchTrend: async (days = 7) => {
+    try {
+      const trend = await api.logs.getTrend(days)
+      set({ trend })
+    } catch (error) {
+      console.error('Failed to fetch trend:', error)
+    }
+  },
+
+  fetchAccountTrend: async (accountId, days = 7) => {
+    try {
+      const trend = await api.logs.getAccountTrend(accountId, days)
+      set({ trend })
+    } catch (error) {
+      console.error('Failed to fetch account trend:', error)
+    }
+  },
 }))
+
+wsClient.on('log:new', (log) => {
+  useLogsStore.getState().addLog(log as LogEntry)
+})
 
 export type { LogFilter, LogStats, LogTrend }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { api } from '@/api'
 import type { AppConfig } from '@/types/electron'
 import i18n from '@/i18n'
 
@@ -45,6 +46,7 @@ interface SettingsState {
   setConfig: (config: AppConfig) => void
   updateConfig: (updates: Partial<AppConfig>) => Promise<void>
   fetchConfig: () => Promise<void>
+  resetConfig: () => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -61,7 +63,7 @@ export const useSettingsStore = create<SettingsState>()(
       setOauthProxyMode: async (mode) => {
         set({ oauthProxyMode: mode })
         try {
-          await window.electronAPI.config.update({ oauthProxyMode: mode })
+          await api.config.update({ oauthProxyMode: mode })
         } catch (error) {
           console.error('Failed to update oauthProxyMode:', error)
         }
@@ -75,7 +77,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoStart: async (enabled) => {
         set({ autoStart: enabled })
         try {
-          await window.electronAPI.config.update({ autoStart: enabled })
+          await api.config.update({ autoStart: enabled })
         } catch (error) {
           console.error('Failed to update autoStart:', error)
         }
@@ -84,7 +86,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoStartProxy: async (enabled) => {
         set({ autoStartProxy: enabled })
         try {
-          await window.electronAPI.config.update({ autoStartProxy: enabled })
+          await api.config.update({ autoStartProxy: enabled })
         } catch (error) {
           console.error('Failed to update autoStartProxy:', error)
         }
@@ -115,7 +117,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ config: newConfig })
         
         try {
-          await window.electronAPI.config.update(updates)
+          await api.config.update(updates)
         } catch (error) {
           console.error('Failed to update config:', error)
           set({ config: currentConfig })
@@ -123,7 +125,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
       fetchConfig: async () => {
         try {
-          const config = await window.electronAPI.config.get()
+          const config = await api.config.get()
           set({ 
             config,
             autoStart: config.autoStart,
@@ -132,6 +134,14 @@ export const useSettingsStore = create<SettingsState>()(
           })
         } catch (error) {
           console.error('Failed to fetch config:', error)
+        }
+      },
+      resetConfig: async () => {
+        try {
+          const config = await api.config.reset()
+          set({ config })
+        } catch (error) {
+          console.error('Failed to reset config:', error)
         }
       },
     }),

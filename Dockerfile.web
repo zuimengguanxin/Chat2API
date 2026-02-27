@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache python3 make g++
+
+COPY package*.json ./
+
+RUN npm ci --only=production
+
+COPY . .
+
+RUN npm run build:web
+
+EXPOSE 3000 8310
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV PROXY_PORT=8310
+
+CMD ["npm", "run", "start:web"]

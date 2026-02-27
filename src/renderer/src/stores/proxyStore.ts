@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { api, wsClient } from '@/api'
 import type { ProxyStatus, ProxyStatistics, LoadBalanceStrategy, ModelMapping, AppConfig } from '@/types/electron'
 
 export interface ProxyConfig {
@@ -130,9 +131,8 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   resetProxyConfig: () => set({ proxyConfig: DEFAULT_PROXY_CONFIG }),
 
   fetchProxyStatus: async () => {
-    if (!window.electronAPI?.proxy?.getStatus) return
     try {
-      const status = await window.electronAPI.proxy.getStatus()
+      const status = await api.proxy.getStatus()
       set({ proxyStatus: status })
     } catch (error) {
       set({ error: (error as Error).message })
@@ -140,12 +140,8 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   fetchProxyStatistics: async () => {
-    if (!window.electronAPI?.invoke) {
-      set({ proxyStatistics: DEFAULT_STATISTICS })
-      return
-    }
     try {
-      const statistics = await window.electronAPI.invoke('proxy:getStatistics') as ProxyStatistics
+      const statistics = await api.proxy.getStatistics()
       set({ proxyStatistics: statistics || DEFAULT_STATISTICS })
     } catch (error) {
       set({ proxyStatistics: DEFAULT_STATISTICS })
@@ -153,10 +149,9 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   fetchAppConfig: async () => {
-    if (!window.electronAPI?.store?.get) return
     try {
       set({ isLoading: true })
-      const config = await window.electronAPI.store.get<AppConfig>('config')
+      const config = await api.config.get()
       if (config) {
         set({
           appConfig: config,
@@ -178,13 +173,12 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   saveAppConfig: async (config) => {
-    if (!window.electronAPI?.store?.set) return false
     try {
       set({ isLoading: true, error: null })
       const currentConfig = get().appConfig
       const newConfig = { ...currentConfig, ...config } as AppConfig
       
-      await window.electronAPI.store.set('config', newConfig)
+      await api.config.update(newConfig)
       set({ appConfig: newConfig })
       return true
     } catch (error) {
@@ -196,14 +190,13 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   startProxy: async (port) => {
-    if (!window.electronAPI?.proxy?.start) return false
     try {
       set({ isLoading: true, error: null })
-      const success = await window.electronAPI.proxy.start(port)
-      if (success) {
+      const result = await api.proxy.start(port)
+      if (result.success) {
         await get().fetchProxyStatus()
       }
-      return success
+      return result.success
     } catch (error) {
       set({ error: (error as Error).message })
       return false
@@ -213,14 +206,13 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   stopProxy: async () => {
-    if (!window.electronAPI?.proxy?.stop) return false
     try {
       set({ isLoading: true, error: null })
-      const success = await window.electronAPI.proxy.stop()
-      if (success) {
+      const result = await api.proxy.stop()
+      if (result.success) {
         await get().fetchProxyStatus()
       }
-      return success
+      return result.success
     } catch (error) {
       set({ error: (error as Error).message })
       return false
@@ -229,5 +221,9 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     }
   },
 }))
+
+wsClient.on('proxy:status', (data) => {
+  useProxyStore.setState({ proxyStatus: data as ProxyStatus })
+})
 
 export default useProxyStore
