@@ -74,6 +74,7 @@ interface ChatCompletionRequest {
   temperature?: number
   tools?: any[]
   tool_choice?: any
+  chatId?: string
 }
 
 interface DeviceInfo {
@@ -497,21 +498,17 @@ export class MiniMaxAdapter {
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse | null; stream: { session: ClientHttp2Session; stream: ClientHttp2Stream } | null; chatId: string }> {
     console.log('[MiniMax] chatCompletion called with model:', request.model, 'stream:', request.stream)
     
-    // Update model from request
     this.model = request.model || 'MiniMax-M2.5'
     this.created = unixTimestamp()
     
     const deviceInfo = await this.requestDeviceInfo()
     
-    // Clone messages to avoid modifying original request
     const messages = [...request.messages]
     
-    // Inject tools definition into prompt if tools are provided
     let toolsPrompt = ''
     if (request.tools && request.tools.length > 0) {
       toolsPrompt = toolsToSystemPrompt(request.tools)
       
-      // Append tool hint to the last user message
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
           const currentContent = messages[i].content
@@ -525,50 +522,68 @@ export class MiniMaxAdapter {
     
     const requestBody = this.messagesPrepare(messages, toolsPrompt)
     
-    // Step 1: Send message
-    const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
+    let chatId: string = request.chatId || ''
+    let msgId: string = ''
     
-    console.log('[MiniMax] Send response status:', sendResponse.status)
-    
-    if (sendResponse.status !== 200) {
-      console.error('[MiniMax] Error response:', JSON.stringify(sendResponse.data))
-      throw new Error(`MiniMax API error: HTTP ${sendResponse.status} - ${JSON.stringify(sendResponse.data)}`)
+    if (chatId) {
+      console.log('[MiniMax] Using existing chat:', chatId)
+      const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', {
+        ...requestBody,
+        chat_id: chatId,
+      }, deviceInfo)
+      
+      if (sendResponse.status !== 200) {
+        throw new Error(`MiniMax API error: HTTP ${sendResponse.status}`)
+      }
+      
+      const { msg_id, base_resp } = sendResponse.data
+      if (base_resp?.status_code !== 0) {
+        throw new Error(`Send message failed: ${base_resp?.status_msg || 'Unknown error'}`)
+      }
+      msgId = msg_id
+    } else {
+      const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
+      
+      console.log('[MiniMax] Send response status:', sendResponse.status)
+      
+      if (sendResponse.status !== 200) {
+        console.error('[MiniMax] Error response:', JSON.stringify(sendResponse.data))
+        throw new Error(`MiniMax API error: HTTP ${sendResponse.status} - ${JSON.stringify(sendResponse.data)}`)
+      }
+      
+      const result = sendResponse.data
+      const base_resp = result.base_resp
+      
+      if (base_resp?.status_code !== 0) {
+        throw new Error(`Send message failed: ${base_resp?.status_msg || 'Unknown error'}`)
+      }
+      
+      chatId = result.chat_id
+      msgId = result.msg_id
+      console.log('[MiniMax] Message sent, chat_id:', chatId, 'msg_id:', msgId)
     }
     
-    const { chat_id, msg_id, base_resp } = sendResponse.data
-    
-    if (base_resp?.status_code !== 0) {
-      throw new Error(`Send message failed: ${base_resp?.status_msg || 'Unknown error'}`)
-    }
-    
-    console.log('[MiniMax] Message sent, chat_id:', chat_id, 'msg_id:', msg_id)
-    
-    // For streaming, use polling mechanism to simulate stream
     if (request.stream !== false) {
-      const transStream = this.createPollingStream(chat_id, deviceInfo, this.model)
-      // Return a mock stream object for compatibility
+      const transStream = this.createPollingStream(chatId, deviceInfo, this.model)
       return { 
         response: null, 
         stream: { session: null as any, stream: transStream as any }, 
-        chatId: chat_id 
+        chatId 
       }
     }
     
-    // For non-streaming, poll until complete
-    const aiMessage = await this.pollForResponse(chat_id, deviceInfo)
+    const aiMessage = await this.pollForResponse(chatId, deviceInfo)
     
-    // Parse tool calls from content
     const content = aiMessage?.msg_content || ''
     const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'minimax')
     
-    // Construct OpenAI-compatible response
     const response = {
       status: 200,
       statusText: 'OK',
       headers: {},
       config: {} as any,
       data: {
-        id: chat_id.toString(),
+        id: chatId,
         model: this.model,
         object: 'chat.completion',
         choices: [{
@@ -585,7 +600,7 @@ export class MiniMaxAdapter {
       },
     }
     
-    return { response, stream: null, chatId: chat_id }
+    return { response, stream: null, chatId }
   }
 
   private async pollForResponse(chatId: string, deviceInfo: DeviceInfo, maxPolls = 120, pollInterval = 1000): Promise<any> {

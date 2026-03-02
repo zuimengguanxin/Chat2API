@@ -199,12 +199,94 @@ export interface AppConfig {
   enableApiKey: boolean
   /** OAuth proxy mode: 'system' uses system proxy, 'none' disables proxy */
   oauthProxyMode: 'system' | 'none'
+  /** Session management configuration */
+  sessionConfig: SessionConfig
 }
 
 /**
  * Log Level Enum
  */
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/**
+ * Session Status Enum
+ */
+export type SessionStatus = 'active' | 'expired' | 'deleted'
+
+/**
+ * Session Mode Enum
+ * - single: Single-turn mode, session deleted after each chat
+ * - multi: Multi-turn mode, session persists until timeout or manual deletion
+ */
+export type SessionMode = 'single' | 'multi'
+
+/**
+ * Chat Message Interface
+ * Represents a single message in a conversation
+ */
+export interface ChatMessage {
+  /** Message role */
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  /** Message content */
+  content: string | any[]
+  /** Timestamp */
+  timestamp: number
+  /** Provider-specific message ID */
+  providerMessageId?: string
+  /** Tool call ID (for tool messages) */
+  toolCallId?: string
+}
+
+/**
+ * Session Record Interface
+ * Represents a conversation session
+ */
+export interface SessionRecord {
+  /** Session unique identifier */
+  id: string
+  /** Provider ID */
+  providerId: string
+  /** Account ID */
+  accountId: string
+  /** Provider-specific session ID (e.g., conversation_id, chat_id) */
+  providerSessionId: string
+  /** Parent message ID (for DeepSeek) */
+  parentMessageId?: string
+  /** Session type */
+  sessionType: 'chat' | 'agent'
+  /** Message history */
+  messages: ChatMessage[]
+  /** Creation time (timestamp) */
+  createdAt: number
+  /** Last active time (timestamp) */
+  lastActiveAt: number
+  /** Session status */
+  status: SessionStatus
+  /** Model used */
+  model?: string
+  /** Session metadata */
+  metadata?: {
+    title?: string
+    tokenCount?: number
+  }
+}
+
+/**
+ * Session Configuration Interface
+ * Global session management settings
+ */
+export interface SessionConfig {
+  /** Session mode: 'single' for delete after chat, 'multi' for persistent sessions */
+  mode: SessionMode
+  /** Session timeout (minutes), default 30 */
+  sessionTimeout: number
+  /** Max messages per session, default 50 */
+  maxMessagesPerSession: number
+  /** Delete session after timeout */
+  deleteAfterTimeout: boolean
+  /** Max active sessions per account, default 3 */
+  maxSessionsPerAccount: number
+}
 
 /**
  * API Key Interface
@@ -315,6 +397,19 @@ export interface StoreSchema {
   logs: LogEntry[]
   /** System prompts */
   systemPrompts: SystemPrompt[]
+  /** Session records */
+  sessions: SessionRecord[]
+}
+
+/**
+ * Default Session Configuration
+ */
+export const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  mode: 'single',
+  sessionTimeout: 30,
+  maxMessagesPerSession: 50,
+  deleteAfterTimeout: true,
+  maxSessionsPerAccount: 3,
 }
 
 /**
@@ -335,6 +430,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   apiKeys: [],
   enableApiKey: false,
   oauthProxyMode: 'system',
+  sessionConfig: DEFAULT_SESSION_CONFIG,
 }
 
 /**

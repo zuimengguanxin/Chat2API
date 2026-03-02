@@ -17,6 +17,10 @@ import {
   BUILTIN_PROVIDERS,
   LogLevel,
   SystemPrompt,
+  SessionRecord,
+  SessionConfig,
+  DEFAULT_SESSION_CONFIG,
+  ChatMessage,
 } from './types'
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { IpcChannels } from '../ipc/channels'
@@ -105,6 +109,7 @@ class StoreManager {
       config: DEFAULT_CONFIG,
       logs: [],
       systemPrompts: [],
+      sessions: [],
     }
   }
 
@@ -864,6 +869,249 @@ class StoreManager {
     return this.getSystemPrompts().filter(p => p.type === type)
   }
 
+  // ==================== Session Operations ====================
+
+  /**
+   * Get Session Configuration
+   */
+  getSessionConfig(): SessionConfig {
+    this.ensureInitialized()
+    const config = this.store!.get('config') || DEFAULT_CONFIG
+    return config.sessionConfig || DEFAULT_SESSION_CONFIG
+  }
+
+  /**
+   * Update Session Configuration
+   */
+  updateSessionConfig(updates: Partial<SessionConfig>): SessionConfig {
+    this.ensureInitialized()
+    const currentConfig = this.store!.get('config') || DEFAULT_CONFIG
+    const newSessionConfig = {
+      ...(currentConfig.sessionConfig || DEFAULT_SESSION_CONFIG),
+      ...updates,
+    }
+    const newConfig = {
+      ...currentConfig,
+      sessionConfig: newSessionConfig,
+    }
+    this.store!.set('config', newConfig)
+    return newSessionConfig
+  }
+
+  /**
+   * Get All Sessions
+   */
+  getSessions(): SessionRecord[] {
+    this.ensureInitialized()
+    return this.store!.get('sessions') || []
+  }
+
+  /**
+   * Get Session By ID
+   */
+  getSessionById(id: string): SessionRecord | undefined {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    return sessions.find((s: SessionRecord) => s.id === id)
+  }
+
+  /**
+   * Get Active Session By Provider and Account
+   */
+  getActiveSessionByProviderAccount(providerId: string, accountId: string): SessionRecord | undefined {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const config = this.getSessionConfig()
+    const timeoutMs = config.sessionTimeout * 60 * 1000
+    const now = Date.now()
+    
+    return sessions.find((s: SessionRecord) => 
+      s.providerId === providerId && 
+      s.accountId === accountId && 
+      s.status === 'active' &&
+      (now - s.lastActiveAt) < timeoutMs
+    )
+  }
+
+  /**
+   * Get Active Sessions
+   */
+  getActiveSessions(): SessionRecord[] {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const config = this.getSessionConfig()
+    const timeoutMs = config.sessionTimeout * 60 * 1000
+    const now = Date.now()
+    
+    return sessions.filter((s: SessionRecord) => 
+      s.status === 'active' && 
+      (now - s.lastActiveAt) < timeoutMs
+    )
+  }
+
+  /**
+   * Add Session
+   */
+  addSession(session: SessionRecord): void {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    sessions.push(session)
+    this.store!.set('sessions', sessions)
+  }
+
+  /**
+   * Update Session
+   */
+  updateSession(id: string, updates: Partial<SessionRecord>): SessionRecord | null {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const index = sessions.findIndex((s: SessionRecord) => s.id === id)
+    
+    if (index === -1) {
+      return null
+    }
+    
+    sessions[index] = {
+      ...sessions[index],
+      ...updates,
+    }
+    
+    this.store!.set('sessions', sessions)
+    return sessions[index]
+  }
+
+  /**
+   * Add Message to Session
+   */
+  addMessageToSession(sessionId: string, message: ChatMessage): SessionRecord | null {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const index = sessions.findIndex((s: SessionRecord) => s.id === sessionId)
+    
+    if (index === -1) {
+      return null
+    }
+    
+    const config = this.getSessionConfig()
+    const session = sessions[index]
+    
+    if (session.messages.length >= config.maxMessagesPerSession) {
+      session.messages = session.messages.slice(-config.maxMessagesPerSession + 1)
+    }
+    
+    session.messages.push(message)
+    session.lastActiveAt = Date.now()
+    
+    sessions[index] = session
+    this.store!.set('sessions', sessions)
+    return session
+  }
+
+  /**
+   * Update Session Provider Session ID
+   */
+  updateProviderSessionId(sessionId: string, providerSessionId: string, parentMessageId?: string): SessionRecord | null {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const index = sessions.findIndex((s: SessionRecord) => s.id === sessionId)
+    
+    if (index === -1) {
+      return null
+    }
+    
+    sessions[index] = {
+      ...sessions[index],
+      providerSessionId,
+      lastActiveAt: Date.now(),
+      ...(parentMessageId !== undefined && { parentMessageId }),
+    }
+    
+    this.store!.set('sessions', sessions)
+    return sessions[index]
+  }
+
+  /**
+   * Delete Session
+   */
+  deleteSession(id: string): boolean {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const index = sessions.findIndex((s: SessionRecord) => s.id === id)
+    
+    if (index === -1) {
+      return false
+    }
+    
+    sessions.splice(index, 1)
+    this.store!.set('sessions', sessions)
+    return true
+  }
+
+  /**
+   * Mark Session as Expired
+   */
+  expireSession(id: string): SessionRecord | null {
+    return this.updateSession(id, { status: 'expired' })
+  }
+
+  /**
+   * Clean Expired Sessions
+   */
+  cleanExpiredSessions(): number {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const config = this.getSessionConfig()
+    const timeoutMs = config.sessionTimeout * 60 * 1000
+    const now = Date.now()
+    
+    const activeSessions = sessions.filter((s: SessionRecord) => {
+      if (s.status !== 'active') return false
+      return (now - s.lastActiveAt) < timeoutMs
+    })
+    
+    const removedCount = sessions.length - activeSessions.length
+    
+    if (config.deleteAfterTimeout) {
+      this.store!.set('sessions', activeSessions)
+    } else {
+      const updatedSessions = sessions.map((s: SessionRecord) => {
+        if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
+          return { ...s, status: 'expired' as const }
+        }
+        return s
+      })
+      this.store!.set('sessions', updatedSessions)
+    }
+    
+    return removedCount
+  }
+
+  /**
+   * Get Sessions By Account ID
+   */
+  getSessionsByAccountId(accountId: string): SessionRecord[] {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    return sessions.filter((s: SessionRecord) => s.accountId === accountId)
+  }
+
+  /**
+   * Get Sessions By Provider ID
+   */
+  getSessionsByProviderId(providerId: string): SessionRecord[] {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    return sessions.filter((s: SessionRecord) => s.providerId === providerId)
+  }
+
+  /**
+   * Clear All Sessions
+   */
+  clearAllSessions(): void {
+    this.ensureInitialized()
+    this.store!.set('sessions', [])
+  }
+
   // ==================== Utility Methods ====================
 
   /**
@@ -895,13 +1143,14 @@ class StoreManager {
   exportData(): Omit<StoreSchema, 'accounts'> & { accounts: Omit<Account, 'credentials'>[] } {
     this.ensureInitialized()
     const providers = this.store!.get('providers') || []
-    const accounts = (this.store!.get('accounts') || []).map((a) => {
+    const accounts = (this.store!.get('accounts') || []).map((a: Account) => {
       const { credentials, ...rest } = a
       return rest
     })
     const config = this.store!.get('config') || DEFAULT_CONFIG
     const logs = this.store!.get('logs') || []
     const systemPrompts = this.store!.get('systemPrompts') || []
+    const sessions = this.store!.get('sessions') || []
     
     return {
       providers,
@@ -909,6 +1158,7 @@ class StoreManager {
       config,
       logs,
       systemPrompts,
+      sessions,
     }
   }
 

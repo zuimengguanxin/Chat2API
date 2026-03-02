@@ -224,6 +224,53 @@ interface PromptsAPI {
   getByType: (type: PromptType) => Promise<SystemPrompt[]>
 }
 
+interface SessionConfig {
+  mode: 'single' | 'multi'
+  sessionTimeout: number
+  maxMessagesPerSession: number
+  deleteAfterTimeout: boolean
+  maxSessionsPerAccount: number
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | any[]
+  timestamp: number
+  providerMessageId?: string
+  toolCallId?: string
+}
+
+interface SessionRecord {
+  id: string
+  providerId: string
+  accountId: string
+  providerSessionId: string
+  parentMessageId?: string
+  sessionType: 'chat' | 'agent'
+  messages: ChatMessage[]
+  createdAt: number
+  lastActiveAt: number
+  status: 'active' | 'expired' | 'deleted'
+  model?: string
+  metadata?: {
+    title?: string
+    tokenCount?: number
+  }
+}
+
+interface SessionAPI {
+  getConfig: () => Promise<SessionConfig>
+  updateConfig: (updates: Partial<SessionConfig>) => Promise<SessionConfig>
+  getAll: () => Promise<SessionRecord[]>
+  getActive: () => Promise<SessionRecord[]>
+  getById: (id: string) => Promise<SessionRecord | undefined>
+  getByAccount: (accountId: string) => Promise<SessionRecord[]>
+  getByProvider: (providerId: string) => Promise<SessionRecord[]>
+  delete: (id: string) => Promise<boolean>
+  clearAll: () => Promise<void>
+  cleanExpired: () => Promise<number>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -234,6 +281,7 @@ interface ElectronAPI {
   app: AppAPI
   config: ConfigAPI
   prompts: PromptsAPI
+  session: SessionAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>

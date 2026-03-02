@@ -9,8 +9,9 @@ import { getBuiltinProviders } from '../providers/builtin'
 import { oauthManager } from '../oauth/manager'
 import { ProxyServer } from '../proxy/server'
 import { proxyStatusManager } from '../proxy/status'
+import { sessionManager } from '../proxy/sessionManager'
 import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig } from '../../shared/types'
-import type { SystemPrompt } from '../store/types'
+import type { SystemPrompt, SessionConfig, SessionRecord } from '../store/types'
 
 let proxyServer: ProxyServer | null = null
 let proxyStartTime: number | null = null
@@ -499,6 +500,48 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.PROMPTS_GET_BY_TYPE, async (_, type: SystemPrompt['type']): Promise<SystemPrompt[]> => {
     return storeManager.getSystemPromptsByType(type)
+  })
+
+  // ==================== Session Management Handlers ====================
+
+  ipcMain.handle(IpcChannels.SESSION_GET_CONFIG, async (): Promise<SessionConfig> => {
+    return sessionManager.getSessionConfig()
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_UPDATE_CONFIG, async (_, updates: Partial<SessionConfig>): Promise<SessionConfig> => {
+    return sessionManager.updateSessionConfig(updates)
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_GET_ALL, async (): Promise<SessionRecord[]> => {
+    return sessionManager.getAllSessions()
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_GET_ACTIVE, async (): Promise<SessionRecord[]> => {
+    return sessionManager.getAllActiveSessions()
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_GET_BY_ID, async (_, id: string): Promise<SessionRecord | undefined> => {
+    return sessionManager.getSession(id)
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_GET_BY_ACCOUNT, async (_, accountId: string): Promise<SessionRecord[]> => {
+    return sessionManager.getSessionsByAccount(accountId)
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_GET_BY_PROVIDER, async (_, providerId: string): Promise<SessionRecord[]> => {
+    return sessionManager.getSessionsByProvider(providerId)
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_DELETE, async (_, id: string): Promise<boolean> => {
+    return sessionManager.deleteSession(id)
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_CLEAR_ALL, async (): Promise<void> => {
+    return sessionManager.clearAllSessions()
+  })
+
+  ipcMain.handle(IpcChannels.SESSION_CLEAN_EXPIRED, async (): Promise<number> => {
+    return sessionManager.cleanExpiredSessions()
   })
   
   oauthManager.on('progress', (event) => {

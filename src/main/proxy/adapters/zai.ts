@@ -43,6 +43,8 @@ interface ChatCompletionRequest {
   temperature?: number
   web_search?: boolean
   reasoning_effort?: 'low' | 'medium' | 'high'
+  chatId?: string
+  parentMessageId?: string
 }
 
 function uuid(separator: boolean = true): string {
@@ -243,7 +245,35 @@ export class ZaiAdapter {
     }
   }
 
-  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; chatId: string }> {
+  async getLatestMessageId(chatId: string, userMessageId: string): Promise<string | null> {
+    try {
+      const token = await this.ensureToken()
+      
+      const response = await axios.post(
+        `${ZAI_API_BASE}/api/v1/chats/${chatId}/messages/batch`,
+        { ids: [userMessageId] },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...FAKE_HEADERS,
+            'Content-Type': 'application/json',
+            Referer: `${ZAI_API_BASE}/c/${chatId}`,
+          },
+          timeout: 15000,
+        }
+      )
+
+      if (response.data?.data?.[userMessageId]?.childrenIds?.length > 0) {
+        return response.data.data[userMessageId].childrenIds[0]
+      }
+      return null
+    } catch (error) {
+      console.error('[Z.ai] Failed to get latest message ID:', error)
+      return null
+    }
+  }
+
+  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; chatId: string; userMessageId: string }> {
     const token = await this.ensureToken()
     const userId = this.extractUserIDFromToken(token)
     
@@ -294,7 +324,22 @@ export class ZaiAdapter {
     }
     
     const signaturePrompt = this.extractLastUserMessage(processedMessages)
-    const { chatId, messageId } = await this.createChat(mappedModel, signaturePrompt)
+    
+    let chatId = request.chatId
+    let messageId = uuid()
+    let isNewChat = false
+    let parentMessageId = request.parentMessageId || null
+    
+    if (!chatId) {
+      const createResult = await this.createChat(mappedModel, signaturePrompt)
+      chatId = createResult.chatId
+      messageId = createResult.messageId
+      isNewChat = true
+    } else {
+      console.log('[Z.ai] Using existing chat:', chatId)
+      console.log('[Z.ai] Parent message ID:', parentMessageId || 'N/A')
+    }
+    
     const requestId = uuid()
     const timestamp = Date.now()
     const signature = this.generateSignature(signaturePrompt, requestId, timestamp, userId)
@@ -329,7 +374,7 @@ export class ZaiAdapter {
       chat_id: chatId,
       id: requestId,
       current_user_message_id: messageId,
-      current_user_message_parent_id: null,
+      current_user_message_parent_id: parentMessageId,
       background_tasks: {
         title_generation: true,
         tags_generation: true,
@@ -340,6 +385,7 @@ export class ZaiAdapter {
     console.log('[Z.ai] Model:', request.model)
     console.log('[Z.ai] ChatId:', chatId)
     console.log('[Z.ai] MessageId (current_user_message_id):', messageId)
+    console.log('[Z.ai] Is new chat:', isNewChat)
     console.log('[Z.ai] Features:', JSON.stringify(features))
 
     const queryParams = new URLSearchParams({
@@ -433,7 +479,7 @@ export class ZaiAdapter {
       }
     }
 
-    return { response, chatId }
+    return { response, chatId, userMessageId: messageId }
   }
 
   static isZaiProvider(provider: Provider): boolean {
@@ -443,6 +489,7 @@ export class ZaiAdapter {
 
 export class ZaiStreamHandler {
   private chatId: string = ''
+  private messageId: string = ''
   private model: string
   private created: number
   private onEnd?: (chatId: string) => void
@@ -545,6 +592,11 @@ export class ZaiStreamHandler {
 
           if (result.phase === 'answer' && result.delta_content) {
             this.content += result.delta_content
+            // Try multiple fields for message ID
+            if (result.message_id || result.id) {
+              this.messageId = result.message_id || result.id
+            }
+            console.log('[Z.ai] Stream answer, message_id:', this.messageId || 'N/A', 'result.message_id:', result.message_id || 'N/A', 'result.id:', result.id || 'N/A')
             transStream.write(
               `data: ${JSON.stringify({
                 id: this.chatId,
@@ -622,7 +674,7 @@ export class ZaiStreamHandler {
     
     return new Promise((resolve, reject) => {
       const data = {
-        id: '',
+        id: this.chatId,
         model: this.model,
         object: 'chat.completion',
         choices: [
@@ -653,8 +705,17 @@ export class ZaiStreamHandler {
 
               if (result.phase === 'answer' && result.delta_content) {
                 data.choices[0].message.content += result.delta_content
+                // Try multiple fields for message ID
+                if (result.message_id || result.id) {
+                  this.messageId = result.message_id || result.id
+                }
+                console.log('[Z.ai] Non-stream answer, message_id:', this.messageId || 'N/A', 'result.message_id:', result.message_id || 'N/A', 'result.id:', result.id || 'N/A')
               } else if (result.phase === 'done' && result.done) {
-                console.log('[Z.ai] Non-stream finished, content length:', data.choices[0].message.content.length)
+                // Also check for message_id in the done phase
+                if (result.message_id || result.id) {
+                  this.messageId = result.message_id || result.id
+                }
+                console.log('[Z.ai] Non-stream finished, content length:', data.choices[0].message.content.length, 'message_id:', this.messageId || 'N/A')
                 if (result.usage) {
                   data.usage = result.usage
                 }
@@ -692,7 +753,15 @@ export class ZaiStreamHandler {
                   if (event.type === 'chat:completion' && event.data) {
                     if (event.data.phase === 'answer' && event.data.delta_content) {
                       content += event.data.delta_content
+                      // Try multiple fields for message ID
+                      if (event.data.message_id || event.data.id) {
+                        this.messageId = event.data.message_id || event.data.id
+                      }
                     } else if (event.data.phase === 'done' && event.data.done) {
+                      // Also check for message_id in the done phase
+                      if (event.data.message_id || event.data.id) {
+                        this.messageId = event.data.message_id || event.data.id
+                      }
                       if (event.data.usage) {
                         data.usage = event.data.usage
                       }
@@ -709,7 +778,7 @@ export class ZaiStreamHandler {
             data.choices[0].message.content = responseData.choices?.[0]?.message?.content || ''
           }
           
-          console.log('[Z.ai] Non-stream JSON finished, content length:', data.choices[0].message.content.length)
+          console.log('[Z.ai] Non-stream JSON finished, content length:', data.choices[0].message.content.length, 'message_id:', this.messageId || 'N/A')
           resolve(data)
         } catch (err) {
           console.error('[Z.ai] Non-stream JSON parse error:', err)
@@ -723,6 +792,10 @@ export class ZaiStreamHandler {
 
   getChatId(): string {
     return this.chatId
+  }
+
+  getMessageId(): string {
+    return this.messageId
   }
 }
 

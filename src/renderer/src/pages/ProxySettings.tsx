@@ -7,8 +7,9 @@ import {
   ProxyStatus,
   AdvancedConfig,
 } from '@/components/proxy'
+import { SessionManagement } from '@/components/proxy/SessionManagement'
 import { useProxyStore } from '@/stores/proxyStore'
-import { Settings, Scale, Activity, Settings2 } from 'lucide-react'
+import { Settings, Scale, Activity, Settings2, MessageSquare } from 'lucide-react'
 
 export function ProxySettings() {
   const { t } = useTranslation()
@@ -32,7 +33,7 @@ export function ProxySettings() {
       </div>
 
       <Tabs defaultValue="status" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto">
+        <TabsList className="grid w-full grid-cols-5 h-auto">
           <TabsTrigger value="status" className="flex items-center gap-2 py-2">
             <Activity className="h-4 w-4" />
             <span className="hidden sm:inline">{t('proxy.statusMonitoring')}</span>
@@ -44,6 +45,10 @@ export function ProxySettings() {
           <TabsTrigger value="loadbalance" className="flex items-center gap-2 py-2">
             <Scale className="h-4 w-4" />
             <span className="hidden sm:inline">{t('proxy.loadBalancing')}</span>
+          </TabsTrigger>
+          <TabsTrigger value="session" className="flex items-center gap-2 py-2">
+            <MessageSquare className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('proxy.sessionManagement')}</span>
           </TabsTrigger>
           <TabsTrigger value="advanced" className="flex items-center gap-2 py-2">
             <Settings2 className="h-4 w-4" />
@@ -61,6 +66,10 @@ export function ProxySettings() {
 
         <TabsContent value="loadbalance" className="mt-6">
           <LoadBalanceConfig />
+        </TabsContent>
+
+        <TabsContent value="session" className="mt-6">
+          <SessionManagement />
         </TabsContent>
 
         <TabsContent value="advanced" className="mt-6">

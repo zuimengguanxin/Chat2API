@@ -15,6 +15,7 @@ import type {
   SystemPrompt,
   PromptType,
 } from '../shared/types'
+import type { SessionConfig, SessionRecord } from '../main/store/types'
 
 const proxyAPI = {
   start: (port?: number): Promise<boolean> => 
@@ -315,6 +316,38 @@ const promptsAPI = {
     ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_TYPE, type),
 }
 
+const sessionAPI = {
+  getConfig: (): Promise<SessionConfig> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_CONFIG),
+  
+  updateConfig: (updates: Partial<SessionConfig>): Promise<SessionConfig> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_UPDATE_CONFIG, updates),
+  
+  getAll: (): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_ALL),
+  
+  getActive: (): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_ACTIVE),
+  
+  getById: (id: string): Promise<SessionRecord | undefined> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_ID, id),
+  
+  getByAccount: (accountId: string): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_ACCOUNT, accountId),
+  
+  getByProvider: (providerId: string): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_PROVIDER, providerId),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_DELETE, id),
+  
+  clearAll: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_CLEAR_ALL),
+  
+  cleanExpired: (): Promise<number> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_CLEAN_EXPIRED),
+}
+
 const electronAPI = {
   proxy: proxyAPI,
   store: storeAPI,
@@ -325,6 +358,7 @@ const electronAPI = {
   app: appAPI,
   config: configAPI,
   prompts: promptsAPI,
+  session: sessionAPI,
   
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)

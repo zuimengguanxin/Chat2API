@@ -61,6 +61,8 @@ interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high'
   tools?: any[]
   tool_choice?: any
+  sessionId?: string
+  parentMessageId?: string
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -345,16 +347,21 @@ ${message.content || ''}
       .replace(/!\[.+\]\(.+\)/g, '')
   }
 
-  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
+  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string; messageId: string }> {
     const token = await this.acquireToken()
-    const sessionId = await this.createSession()
+    
+    let sessionId = request.sessionId
+    let parentMessageId = request.parentMessageId || null
+    
+    if (!sessionId) {
+      sessionId = await this.createSession()
+    }
+    
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
 
-    // Clone messages to avoid modifying original request
     const messages = [...request.messages]
 
-    // Append tool hint to the last user message if tools are provided
     if (request.tools && request.tools.length > 0) {
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
@@ -370,11 +377,8 @@ ${message.content || ''}
 
     let prompt = this.messagesToPrompt(messages)
 
-    // Inject tools definition into prompt if tools are provided
     if (request.tools && request.tools.length > 0) {
-      // Use simple prompt for DeepSeek
       const toolsPrompt = toolsToSystemPrompt(request.tools, true)
-      // Insert tools prompt at the beginning of the conversation
       if (prompt.startsWith('<｜User｜>')) {
         prompt = prompt.replace('<｜User｜>', `<｜User｜>${toolsPrompt}\n\n`)
       } else {
@@ -382,7 +386,6 @@ ${message.content || ''}
       }
     }
 
-    // Use request parameters for mode control (OpenAI compatible)
     let searchEnabled = false
     let thinkingEnabled = false
 
@@ -396,7 +399,6 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled, effort:', request.reasoning_effort)
     }
 
-    // Fallback: check model name for backward compatibility
     const modelLower = request.model.toLowerCase()
     if (!searchEnabled && modelLower.includes('search')) {
       searchEnabled = true
@@ -406,17 +408,19 @@ ${message.content || ''}
       thinkingEnabled = true
       console.log('[DeepSeek] Reasoning mode enabled (from model name)')
     }
-    // Also check prompt for deep thinking keyword
     if (!thinkingEnabled && prompt.includes('deep thinking')) {
       thinkingEnabled = true
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
+    console.log('[DeepSeek] Using session:', { sessionId, parentMessageId })
+    console.log('[DeepSeek] Prompt length:', prompt.length, 'chars')
+
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
-        parent_message_id: null,
+        parent_message_id: parentMessageId,
         prompt,
         ref_file_ids: [],
         search_enabled: searchEnabled,
@@ -435,7 +439,7 @@ ${message.content || ''}
       }
     )
 
-    return { response, sessionId }
+    return { response, sessionId, messageId: '' }
   }
 
   static isDeepSeekProvider(provider: Provider): boolean {

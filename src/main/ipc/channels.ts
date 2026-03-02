@@ -72,6 +72,17 @@ export const IpcChannels = {
   PROMPTS_UPDATE: 'prompts:update',
   PROMPTS_DELETE: 'prompts:delete',
   PROMPTS_GET_BY_TYPE: 'prompts:getByType',
+
+  SESSION_GET_CONFIG: 'session:getConfig',
+  SESSION_UPDATE_CONFIG: 'session:updateConfig',
+  SESSION_GET_ALL: 'session:getAll',
+  SESSION_GET_ACTIVE: 'session:getActive',
+  SESSION_GET_BY_ID: 'session:getById',
+  SESSION_GET_BY_ACCOUNT: 'session:getByAccount',
+  SESSION_GET_BY_PROVIDER: 'session:getByProvider',
+  SESSION_DELETE: 'session:delete',
+  SESSION_CLEAR_ALL: 'session:clearAll',
+  SESSION_CLEAN_EXPIRED: 'session:cleanExpired',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

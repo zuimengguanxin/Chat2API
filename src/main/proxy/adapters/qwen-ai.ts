@@ -62,6 +62,7 @@ interface ChatCompletionRequest {
   temperature?: number
   enable_thinking?: boolean
   thinking_budget?: number
+  chatId?: string
 }
 
 function uuid(): string {
@@ -193,7 +194,12 @@ export class QwenAiAdapter {
     const modelId = this.mapModel(request.model)
     console.log('[QwenAI] Using model:', modelId)
 
-    const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+    let chatId = request.chatId
+    if (!chatId) {
+      chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+    } else {
+      console.log('[QwenAI] Using existing chat:', chatId)
+    }
 
     const messages = request.messages
     
@@ -622,6 +628,10 @@ export class QwenAiStreamHandler {
   }
 
   getResponseId(): string {
+    return this.responseId
+  }
+
+  getMessageId(): string {
     return this.responseId
   }
 }

@@ -58,6 +58,7 @@ interface ChatCompletionRequest {
   enableWebSearch?: boolean
   tools?: any[]
   tool_choice?: any
+  conversationId?: string
 }
 
 const accessTokenMap = new Map<string, TokenInfo>()
@@ -239,16 +240,12 @@ export class KimiAdapter {
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; conversationId: string }> {
     const { accessToken } = await this.acquireToken()
 
-    // Clone messages to avoid modifying original request
     const messages = [...request.messages]
 
     let toolsPrompt = ''
-    // Inject tools definition into prompt if tools are provided
     if (request.tools && request.tools.length > 0) {
-      // Use simple prompt for Kimi to avoid confusion with prefixes
       toolsPrompt = toolsToSystemPrompt(request.tools, true)
 
-      // Append tool hint to the last user message
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
           const currentContent = messages[i].content
@@ -269,11 +266,13 @@ export class KimiAdapter {
 
     const enableThinking = request.enableThinking ?? false
     const enableWebSearch = request.enableWebSearch ?? false
+    const conversationId = request.conversationId || ''
 
-    console.log(`[Kimi] Model: ${request.model}, thinking: ${enableThinking}, webSearch: ${enableWebSearch}`)
+    console.log(`[Kimi] Model: ${request.model}, thinking: ${enableThinking}, webSearch: ${enableWebSearch}, conversationId: ${conversationId || '(new)'}`)
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
+      conversation_id: conversationId,
       tools: enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
       message: {
         role: 'user',
@@ -326,6 +325,11 @@ export class KimiAdapter {
     return { response, conversationId: `kimi-${Date.now()}` }
   }
 
+  async deleteConversation(conversationId: string): Promise<boolean> {
+    console.log('[Kimi] Delete conversation not supported, conversationId:', conversationId)
+    return true
+  }
+
   static isKimiProvider(provider: Provider): boolean {
     return provider.id === 'kimi' || provider.apiEndpoint.includes('kimi.com')
   }
@@ -342,6 +346,10 @@ export class KimiStreamHandler {
     this.conversationId = conversationId
     this.enableThinking = enableThinking
     this.toolCallState = createToolCallState()
+  }
+
+  getConversationId(): string {
+    return this.conversationId
   }
 
   async handleStream(stream: any): Promise<PassThrough> {

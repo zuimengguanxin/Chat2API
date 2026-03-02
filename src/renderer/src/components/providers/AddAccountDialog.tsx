@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { 
   ExternalLink, 
@@ -112,7 +111,6 @@ export function AddAccountDialog({
   const [activeTab, setActiveTab] = useState<string>('manual')
   const [name, setName] = useState('')
   const [dailyLimit, setDailyLimit] = useState<string>('')
-  const [deleteSessionAfterChat, setDeleteSessionAfterChat] = useState(false)
   const [credentials, setCredentials] = useState<Record<string, string>>({})
   const [isValidating, setIsValidating] = useState(false)
   const [validationResult, setValidationResult] = useState<{
@@ -139,7 +137,6 @@ export function AddAccountDialog({
       if (editingAccount) {
         setName(editingAccount.name)
         setDailyLimit(editingAccount.dailyLimit?.toString() || '')
-        setDeleteSessionAfterChat(editingAccount.deleteSessionAfterChat || false)
         setCredentials(editingAccount.credentials || {})
         setActiveTab('manual')
       } else {
@@ -151,7 +148,6 @@ export function AddAccountDialog({
   const resetForm = () => {
     setName('')
     setDailyLimit('')
-    setDeleteSessionAfterChat(false)
     setCredentials({})
     setValidationResult({})
     setActiveTab('manual')
@@ -237,7 +233,6 @@ export function AddAccountDialog({
         name: name.trim(),
         credentials: finalCredentials,
         dailyLimit: dailyLimit ? parseInt(dailyLimit, 10) : undefined,
-        deleteSessionAfterChat,
       }
 
       if (isEditing && editingAccount && onUpdateAccount) {
@@ -338,20 +333,6 @@ export function AddAccountDialog({
                 placeholder={t('providers.dailyLimitPlaceholder')}
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(e.target.value)}
-              />
-            </div>
-
-            <div className="flex items-center justify-between py-2">
-              <div className="space-y-0.5">
-                <Label htmlFor="delete-session">{t('providers.deleteSessionAfterChat')}</Label>
-                <p className="text-sm text-muted-foreground">
-                  {t('providers.deleteSessionHelp')}
-                </p>
-              </div>
-              <Switch
-                id="delete-session"
-                checked={deleteSessionAfterChat}
-                onCheckedChange={setDeleteSessionAfterChat}
               />
             </div>
 

@@ -76,6 +76,7 @@ interface ChatCompletionRequest {
   deep_research?: boolean
   tools?: any[]
   tool_choice?: any
+  conversationId?: string
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -476,11 +477,18 @@ GLM STRICT RULES:
     }
 
     console.log('[GLM] Sending chat request...')
+    const conversationId = request.conversationId || ''
+    console.log('[GLM] Using conversation ID:', conversationId || '(new)')
+    console.log('[GLM] Assistant ID:', assistantId)
+    console.log('[GLM] Chat mode:', chatMode || 'default')
+    console.log('[GLM] Web search enabled:', isNetworking)
+    console.log('[GLM] Messages count:', messages.length)
+    
     const response = await axios.post(
       `${GLM_API_BASE}/backend-api/assistant/stream`,
       {
         assistant_id: assistantId,
-        conversation_id: '',
+        conversation_id: conversationId,
         project_id: '',
         chat_type: 'user_chat',
         messages: preparedMessages,
@@ -515,7 +523,7 @@ GLM STRICT RULES:
       }
     )
 
-    return { response, conversationId: '' }
+    return { response, conversationId }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {
@@ -817,6 +825,7 @@ export class GLMStreamHandler {
 
             if (!conversationId && result.conversation_id) {
               conversationId = result.conversation_id
+              this.conversationId = conversationId
             }
 
             if (result.status !== 'finish') {

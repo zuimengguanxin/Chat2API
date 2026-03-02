@@ -43,6 +43,14 @@ export class DeepSeekStreamHandler {
     this.toolCallState = createToolCallState()
   }
 
+  getMessageId(): string {
+    return this.messageId
+  }
+
+  getSessionId(): string {
+    return this.sessionId
+  }
+
   private parseSSE(data: string): StreamChunk | null {
     try {
       return JSON.parse(data)
@@ -116,6 +124,7 @@ export class DeepSeekStreamHandler {
   ): void {
     if (chunk.response_message_id && !this.messageId) {
       this.messageId = chunk.response_message_id
+      console.log('[DeepSeek] Stream received messageId:', chunk.response_message_id)
     }
 
     if (chunk.v && typeof chunk.v === 'object' && chunk.v.response) {
@@ -327,6 +336,10 @@ export class DeepSeekStreamHandler {
       })
 
       stream.on('end', () => {
+        // Set the message ID for external retrieval
+        this.messageId = messageId
+        console.log('[DeepSeek] Non-stream finished, messageId:', messageId, 'content length:', accumulatedContent.length)
+
         // Parse tool calls from accumulated content
         const { content: cleanContent, toolCalls } = parseToolCallsFromText(accumulatedContent)
 

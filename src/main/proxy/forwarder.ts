@@ -10,6 +10,7 @@ import { Account, Provider } from '../store/types'
 import { ForwardResult, ChatCompletionRequest, ProxyContext, ChatCompletionTool, ToolCall } from './types'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
+import { sessionManager } from './sessionManager'
 import { DeepSeekAdapter } from './adapters/deepseek'
 import { DeepSeekStreamHandler } from './adapters/deepseek-stream'
 import { GLMAdapter, GLMStreamHandler } from './adapters/glm'
@@ -260,7 +261,6 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       const transformedRequest = {
         ...request,
@@ -269,11 +269,27 @@ export class RequestForwarder {
       }
 
       const adapter = new DeepSeekAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
+      console.log('[DeepSeek] Session context:', {
+        sessionId: sessionContext.sessionId,
+        providerSessionId: sessionContext.providerSessionId,
+        parentMessageId: sessionContext.parentMessageId,
+        isNew: sessionContext.isNew,
+      })
+      
       const { response, sessionId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformedRequest.messages as any,
         stream: transformedRequest.stream,
         temperature: transformedRequest.temperature,
+        sessionId: sessionContext.providerSessionId,
+        parentMessageId: sessionContext.parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -297,22 +313,35 @@ export class RequestForwarder {
         }
       }
 
-      // Prepare callback for deleting session
-      const deleteSessionCallback = account.deleteSessionAfterChat
-        ? async () => {
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
+      
+      const deleteSessionCallback = shouldDeleteSession
+        ? async (sid: string, msgId: string) => {
             try {
-              await adapter.deleteSession(sessionId)
+              await adapter.deleteSession(sid)
+              if (sessionContext.sessionId) {
+                sessionManager.deleteSession(sessionContext.sessionId)
+              }
             } catch (error) {
               console.error('[DeepSeek] Failed to delete session:', error)
             }
           }
         : undefined
 
-      // DeepSeek always returns streaming response
-      const handler = new DeepSeekStreamHandler(actualModel, sessionId, deleteSessionCallback)
+      const handler = new DeepSeekStreamHandler(actualModel, sessionId, undefined)
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+        
+        transformedStream.on('end', () => {
+          const msgId = handler.getMessageId()
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled()) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, sessionId, msgId)
+          }
+          if (deleteSessionCallback && shouldDeleteSession) {
+            deleteSessionCallback(sessionId, msgId)
+          }
+        })
         
         return {
           success: true,
@@ -324,25 +353,26 @@ export class RequestForwarder {
         }
       }
 
-      // Non-streaming requests need to collect stream data and convert
       const result = await handler.handleNonStream(response.data)
       
-      // Parse tool calls from response content if using prompt-based tool calling
+      const msgId = handler.getMessageId()
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled()) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, sessionId, msgId)
+      }
+      
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
         
         if (toolCalls && toolCalls.length > 0) {
-          // Found tool calls in response, add them to the response
           result.choices[0].message.tool_calls = toolCalls
           result.choices[0].message.content = null
           result.choices[0].finish_reason = 'tool_calls'
         }
       }
       
-      // Delete session after non-streaming request ends
-      if (deleteSessionCallback) {
-        await deleteSessionCallback()
+      if (deleteSessionCallback && shouldDeleteSession) {
+        await deleteSessionCallback(sessionId, msgId)
       }
 
       return {
@@ -373,7 +403,6 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       const transformedRequest = {
         ...request,
@@ -382,6 +411,19 @@ export class RequestForwarder {
       }
 
       const adapter = new GLMAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
+      console.log('[GLM] Session context:', {
+        sessionId: sessionContext.sessionId,
+        providerSessionId: sessionContext.providerSessionId,
+        isNew: sessionContext.isNew,
+      })
+      
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformedRequest.messages,
@@ -390,6 +432,7 @@ export class RequestForwarder {
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
         deep_research: transformedRequest.deep_research,
+        conversationId: sessionContext.providerSessionId,
       })
 
       const latency = Date.now() - startTime
@@ -415,24 +458,26 @@ export class RequestForwarder {
         }
       }
 
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
       const handler = new GLMStreamHandler(actualModel)
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // If delete session after chat is enabled, we need to handle it after stream ends
-        if (account.deleteSessionAfterChat) {
-          const originalEnd = transformedStream.end.bind(transformedStream)
-          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
-            const convId = handler.getConversationId()
-            if (convId) {
-              adapter.deleteConversation(convId).catch(err => {
-                console.error('[GLM] Failed to delete session:', err)
-              })
-            }
-            return originalEnd(chunk, encoding, callback)
+        transformedStream.on('end', () => {
+          const convId = handler.getConversationId()
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && convId) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
           }
-        }
+          if (shouldDeleteSession && convId) {
+            adapter.deleteConversation(convId).catch(err => {
+              console.error('[GLM] Failed to delete session:', err)
+            })
+            if (sessionContext.sessionId) {
+              sessionManager.deleteSession(sessionContext.sessionId)
+            }
+          }
+        })
         
         return {
           success: true,
@@ -446,7 +491,12 @@ export class RequestForwarder {
 
       const result = await handler.handleNonStream(response.data)
       
-      // Parse tool calls from response content if using prompt-based tool calling
+      const convId = handler.getConversationId()
+      console.log('[GLM] Non-stream finished, conversationId:', convId)
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && convId) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
+      }
+      
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
@@ -458,11 +508,10 @@ export class RequestForwarder {
         }
       }
       
-      // Delete session after non-stream response
-      if (account.deleteSessionAfterChat) {
-        const convId = handler.getConversationId()
-        if (convId) {
-          await adapter.deleteConversation(convId)
+      if (shouldDeleteSession && convId) {
+        await adapter.deleteConversation(convId)
+        if (sessionContext.sessionId) {
+          sessionManager.deleteSession(sessionContext.sessionId)
         }
       }
 
@@ -491,10 +540,16 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       
       const adapter = new KimiAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages,
@@ -502,6 +557,7 @@ export class RequestForwarder {
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
+        conversationId: sessionContext.providerSessionId,
       })
 
       const latency = Date.now() - startTime
@@ -516,10 +572,26 @@ export class RequestForwarder {
         }
       }
 
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
       const handler = new KimiStreamHandler(actualModel, conversationId, !!request.reasoning_effort)
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+        
+        transformedStream.on('end', () => {
+          const convId = handler.getConversationId()
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && convId) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
+          }
+          if (shouldDeleteSession && convId) {
+            adapter.deleteConversation(convId).catch(err => {
+              console.error('[Kimi] Failed to delete session:', err)
+            })
+            if (sessionContext.sessionId) {
+              sessionManager.deleteSession(sessionContext.sessionId)
+            }
+          }
+        })
         
         return {
           success: true,
@@ -532,8 +604,12 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(response.data)
+      
+      const convId = handler.getConversationId()
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && convId) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
+      }
 
-      // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
@@ -542,6 +618,13 @@ export class RequestForwarder {
           result.choices[0].message.tool_calls = toolCalls
           result.choices[0].message.content = null
           result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
+      
+      if (shouldDeleteSession && convId) {
+        await adapter.deleteConversation(convId)
+        if (sessionContext.sessionId) {
+          sessionManager.deleteSession(sessionContext.sessionId)
         }
       }
 
@@ -573,7 +656,6 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       const transformedRequest = {
         ...request,
@@ -582,11 +664,19 @@ export class RequestForwarder {
       }
 
       const adapter = new QwenAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
       const { response, sessionId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformedRequest.messages as any,
         stream: request.stream,
         temperature: request.temperature,
+        session_id: sessionContext.providerSessionId,
       })
 
       const latency = Date.now() - startTime
@@ -601,10 +691,14 @@ export class RequestForwarder {
         }
       }
 
-      const deleteSessionCallback = account.deleteSessionAfterChat
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
+      const deleteSessionCallback = shouldDeleteSession
         ? async (sid: string) => {
             try {
               await adapter.deleteSession(sid)
+              if (sessionContext.sessionId) {
+                sessionManager.deleteSession(sessionContext.sessionId)
+              }
             } catch (err) {
               console.error('[Qwen] Failed to delete session:', err)
             }
@@ -615,7 +709,14 @@ export class RequestForwarder {
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data, response)
-
+        
+        transformedStream.on('end', () => {
+          const sid = handler.getSessionId()
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && sid) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, sid)
+          }
+        })
+        
         return {
           success: true,
           status: response.status,
@@ -627,8 +728,12 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(response.data, response)
+      
+      const sid = handler.getSessionId()
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && sid) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, sid)
+      }
 
-      // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
@@ -640,7 +745,6 @@ export class RequestForwarder {
         }
       }
 
-      const sid = handler.getSessionId()
       if (deleteSessionCallback && sid) {
         await deleteSessionCallback(sid)
       }
@@ -673,16 +777,23 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       
       const adapter = new QwenAiAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
       const { response, chatId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
+        chatId: sessionContext.providerSessionId,
       })
 
       const latency = Date.now() - startTime
@@ -697,10 +808,14 @@ export class RequestForwarder {
         }
       }
 
-      const deleteChatCallback = account.deleteSessionAfterChat
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
+      const deleteChatCallback = shouldDeleteSession
         ? async (cid: string) => {
             try {
               await adapter.deleteChat(cid)
+              if (sessionContext.sessionId) {
+                sessionManager.deleteSession(sessionContext.sessionId)
+              }
             } catch (err) {
               console.error('[QwenAI] Failed to delete chat:', err)
             }
@@ -712,6 +827,13 @@ export class RequestForwarder {
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+        
+        transformedStream.on('end', () => {
+          const msgId = handler.getMessageId()
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId, msgId)
+          }
+        })
 
         return {
           success: true,
@@ -724,8 +846,11 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(response.data)
+      
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId)
+      }
 
-      // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
@@ -771,17 +896,31 @@ export class RequestForwarder {
     console.log('[forwardZai] actualModel:', actualModel)
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       
       const adapter = new ZaiAdapter(provider, account)
-      const { response, chatId } = await adapter.chatCompletion({
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
+      console.log('[Z.ai] Session context:', {
+        sessionId: sessionContext.sessionId,
+        providerSessionId: sessionContext.providerSessionId,
+        isNew: sessionContext.isNew,
+      })
+      
+      const { response, chatId, userMessageId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
+        chatId: sessionContext.providerSessionId,
+        parentMessageId: sessionContext.parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -796,10 +935,14 @@ export class RequestForwarder {
         }
       }
 
-      const deleteChatCallback = account.deleteSessionAfterChat
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
+      const deleteChatCallback = shouldDeleteSession
         ? async (cid: string) => {
             try {
               await adapter.deleteChat(cid)
+              if (sessionContext.sessionId) {
+                sessionManager.deleteSession(sessionContext.sessionId)
+              }
             } catch (error) {
               console.error('[Z.ai] Failed to delete chat:', error)
             }
@@ -812,6 +955,21 @@ export class RequestForwarder {
       if (request.stream !== false) {
         const transformedStream = await handler.handleStream(response.data)
         
+        transformedStream.on('end', async () => {
+          // For Z.ai, we need to call the batch API to get the assistant message ID
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId && userMessageId) {
+            try {
+              const assistantMsgId = await adapter.getLatestMessageId(chatId, userMessageId)
+              console.log('[Z.ai] Got assistant message ID from batch API:', assistantMsgId || 'N/A')
+              if (assistantMsgId) {
+                sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId, assistantMsgId)
+              }
+            } catch (error) {
+              console.error('[Z.ai] Failed to get assistant message ID:', error)
+            }
+          }
+        })
+        
         return {
           success: true,
           status: response.status,
@@ -823,8 +981,25 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(response)
+      
+      console.log('[Z.ai] Non-stream finished, chatId:', chatId)
+      
+      // For Z.ai, we need to call the batch API to get the assistant message ID
+      let assistantMsgId: string | undefined
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId && userMessageId) {
+        try {
+          const msgId = await adapter.getLatestMessageId(chatId, userMessageId)
+          assistantMsgId = msgId || undefined
+          console.log('[Z.ai] Got assistant message ID from batch API:', assistantMsgId || 'N/A')
+        } catch (error) {
+          console.error('[Z.ai] Failed to get assistant message ID:', error)
+        }
+      }
+      
+      if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId, assistantMsgId)
+      }
 
-      // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''
         const toolCalls = this.parseToolCallsFromContent(content)
@@ -870,15 +1045,22 @@ export class RequestForwarder {
     console.log('[forwardMiniMax] actualModel:', actualModel)
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
     try {
-      // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       
       const adapter = new MiniMaxAdapter(provider, account)
+      
+      const sessionContext = sessionManager.getOrCreateSession({
+        providerId: provider.id,
+        accountId: account.id,
+        model: actualModel,
+      })
+      
       const { response, stream, chatId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
+        chatId: sessionContext.providerSessionId,
       })
 
       const latency = Date.now() - startTime
@@ -893,10 +1075,14 @@ export class RequestForwarder {
         }
       }
 
-      const deleteChatCallback = account.deleteSessionAfterChat
+      const shouldDeleteSession = sessionManager.shouldDeleteAfterChat()
+      const deleteChatCallback = shouldDeleteSession
         ? async (cid: string) => {
             try {
               await adapter.deleteChat(cid)
+              if (sessionContext.sessionId) {
+                sessionManager.deleteSession(sessionContext.sessionId)
+              }
             } catch (error) {
               console.error('[MiniMax] Failed to delete chat:', error)
             }
@@ -905,7 +1091,16 @@ export class RequestForwarder {
 
       if (request.stream !== false && stream) {
         console.log('[forwardMiniMax] Using polling stream')
-        // The stream is already a PassThrough with SSE format, return directly
+        
+        stream.stream.on('end', () => {
+          if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId)
+          }
+          if (deleteChatCallback && shouldDeleteSession) {
+            deleteChatCallback(chatId)
+          }
+        })
+        
         return {
           success: true,
           status: 200,
@@ -917,7 +1112,10 @@ export class RequestForwarder {
       }
 
       if (response) {
-        // Parse tool calls from response content if using prompt-based tool calling
+        if (sessionContext.sessionId && sessionManager.isMultiTurnEnabled() && chatId) {
+          sessionManager.updateProviderSessionId(sessionContext.sessionId, chatId)
+        }
+        
         if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
           const content = response.data?.choices?.[0]?.message?.content || ''
           const toolCalls = this.parseToolCallsFromContent(content)
@@ -929,8 +1127,7 @@ export class RequestForwarder {
           }
         }
         
-        // Response is already formatted as OpenAI-compatible format
-        if (deleteChatCallback) {
+        if (deleteChatCallback && shouldDeleteSession) {
           await deleteChatCallback(chatId)
         }
 
