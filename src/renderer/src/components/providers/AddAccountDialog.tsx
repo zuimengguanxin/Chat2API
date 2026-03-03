@@ -27,6 +27,10 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import type { Provider, CredentialField, Account, BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
+import { api } from '@/api'
+
+// NOTE: OAuth login is not supported in Web version
+const supportsOAuth = false
 
 /**
  * Map OAuth credentials to provider credential field names
@@ -132,7 +136,7 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
-  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'minimax', 'qwen', 'qwen-ai', 'zai'].includes(provider.id)
+  // OAuth login is not supported in Web version
 
   useEffect(() => {
     if (open) {
@@ -259,48 +263,11 @@ export function AddAccountDialog({
   }
 
   const handleOpenOAuthBrowser = async () => {
-    if (!provider) return
-    
-    setIsOAuthLoading(true)
-    setOAuthStatus(t('providers.openingLoginWindow'))
-    
-    try {
-      const result = await window.electronAPI?.oauth.startInAppLogin(
-        provider.id,
-        provider.id as ProviderVendor
-      )
-      
-      if (result?.success && result.credentials) {
-        // Map OAuth credentials to provider credential field names
-        const mappedCredentials = mapOAuthCredentials(provider?.id, result.credentials)
-        setCredentials(mappedCredentials)
-        setOAuthStatus(t('providers.loginSuccess'))
-        
-        if (result.accountInfo?.name) {
-          setName(result.accountInfo.name)
-        }
-        
-        setValidationResult({
-          valid: true,
-          userInfo: result.accountInfo
-        })
-      } else {
-        const errorMsg = result?.error || ''
-        const translatedError = errorMsg === 'Login window was closed' 
-          ? t('providers.loginWindowClosed')
-          : errorMsg === 'A login window is already open'
-            ? t('providers.loginWindowAlreadyOpen')
-            : errorMsg.includes('Guest account') 
-              ? t('providers.guestAccountNotAllowed')
-              : errorMsg || t('providers.loginFailed')
-        setOAuthStatus(translatedError)
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : t('providers.loginFailed')
-      setOAuthStatus(errorMessage)
-    } finally {
-      setIsOAuthLoading(false)
-    }
+    // OAuth login is not supported in Web version
+    setValidationResult({
+      valid: false,
+      error: t('providers.oauthNotSupported'),
+    })
   }
 
   if (!provider) return null
@@ -355,58 +322,13 @@ export function AddAccountDialog({
               />
             </div>
 
-            {supportsOAuth && !isEditing && (
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="manual">{t('providers.manualInput')}</TabsTrigger>
-                  <TabsTrigger value="oauth">{t('providers.oauthLogin')}</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="manual" className="mt-4">
-                  <CredentialFieldsForm
-                    fields={credentialFields}
-                    credentials={credentials}
-                    onChange={handleCredentialChange}
-                    t={t}
-                    providerId={provider?.id}
-                  />
-                </TabsContent>
-
-                <TabsContent value="oauth" className="mt-4">
-                  <div className="flex flex-col items-center justify-center py-6 space-y-4">
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground mb-4">
-                        {t('providers.clickToOpenOAuth')}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t('providers.oauthAutoCapture')}
-                      </p>
-                    </div>
-                    <Button 
-                      onClick={handleOpenOAuthBrowser}
-                      disabled={isOAuthLoading}
-                    >
-                      {isOAuthLoading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          {oauthStatus || t('providers.loggingIn')}
-                        </>
-                      ) : (
-                        <>
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          {t('providers.openOAuthLogin')}
-                        </>
-                      )}
-                    </Button>
-                    {oauthStatus && !isOAuthLoading && (
-                      <p className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
-                        {oauthStatus}
-                      </p>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            )}
+            <CredentialFieldsForm
+              fields={credentialFields}
+              credentials={credentials}
+              onChange={handleCredentialChange}
+              t={t}
+              providerId={provider?.id}
+            />
 
             {(!supportsOAuth || isEditing) && (
               <CredentialFieldsForm

@@ -16,9 +16,9 @@ import {
   AccountDetail,
   ProviderFilter,
 } from '@/components/providers'
-import type { 
-  Provider, 
-  ProviderStatus, 
+import type {
+  Provider,
+  ProviderStatus,
   BuiltinProviderConfig,
   CustomProviderFormData,
   Account,
@@ -27,6 +27,7 @@ import type {
 import { FilterType, StatusFilter } from '@/components/providers/ProviderFilter'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Server, ArrowLeft } from 'lucide-react'
+import { api } from '@/api'
 
 type ViewMode = 'providers' | 'accounts' | 'account-detail'
 
@@ -35,80 +36,47 @@ export function Providers() {
   const { toast } = useToast()
   const store = useProvidersStore()
   const hasLoadedRef = useRef(false)
-  
+
   const [viewMode, setViewMode] = useState<ViewMode>('providers')
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<FilterType>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [isRefreshing, setIsRefreshing] = useState(false)
-  
+
   const [showAddProviderDialog, setShowAddProviderDialog] = useState(false)
   const [showCustomProviderForm, setShowCustomProviderForm] = useState(false)
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null)
-  
+
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
-  
+
   useEffect(() => {
     if (hasLoadedRef.current) return
     hasLoadedRef.current = true
-    
+
     const loadInitialData = async () => {
-      if (!window.electronAPI?.providers?.getAll) {
-        console.log('electronAPI not available')
-        useProvidersStore.getState().setIsLoading(false)
-        useProvidersStore.getState().setProviders([])
-        useProvidersStore.getState().setBuiltinProviders([])
-        useProvidersStore.getState().setAccounts([])
-        return
-      }
-      
       try {
-        useProvidersStore.getState().setIsLoading(true)
-        const [providersData, builtinData, accountsData] = await Promise.all([
-          window.electronAPI.providers.getAll(),
-          window.electronAPI.providers.getBuiltin(),
-          window.electronAPI.accounts.getAll(),
+        store.setIsLoading(true)
+        await Promise.all([
+          store.fetchProviders(),
+          store.fetchBuiltinProviders(),
+          store.fetchAccounts(),
         ])
-        
-        useProvidersStore.getState().setProviders(providersData)
-        useProvidersStore.getState().setBuiltinProviders(builtinData)
-        useProvidersStore.getState().setAccounts(accountsData)
-        
-        const existingStatuses = useProvidersStore.getState().providerStatuses
-        const statusMap: Record<string, ProviderStatus> = { ...existingStatuses }
-        const countMap: Record<string, { total: number; active: number }> = {}
-        
-        for (const provider of providersData) {
-          if (provider.status) {
-            statusMap[provider.id] = provider.status
-          } else if (!statusMap[provider.id]) {
-            statusMap[provider.id] = 'unknown'
-          }
-          const providerAccounts = accountsData.filter(a => a.providerId === provider.id)
-          countMap[provider.id] = {
-            total: providerAccounts.length,
-            active: providerAccounts.filter(a => a.status === 'active').length,
-          }
-        }
-        
-        useProvidersStore.getState().setProviderStatuses(statusMap)
-        useProvidersStore.getState().setAccountCounts(countMap)
       } catch (error) {
         console.error('Failed to load providers:', error)
       } finally {
-        useProvidersStore.getState().setIsLoading(false)
+        store.setIsLoading(false)
       }
     }
-    
+
     loadInitialData()
   }, [])
 
   const filteredProviders = store.providers.filter((provider) => {
-    const matchesSearch = 
+    const matchesSearch =
       provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       provider.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      provider.supportedModels?.some(model => 
+      provider.supportedModels?.some(model =>
         model.toLowerCase().includes(searchQuery.toLowerCase())
       )
 
@@ -138,7 +106,7 @@ export function Providers() {
 
   const handleToggleProvider = async (id: string, enabled: boolean) => {
     try {
-      await window.electronAPI.providers.update(id, { enabled })
+      await api.providers.update(id, { enabled })
       store.updateProvider(id, { enabled })
       toast({
         title: enabled ? t('providers.enabled') : t('providers.disabled'),
@@ -163,14 +131,12 @@ export function Providers() {
 
   const handleDeleteProvider = async (id: string) => {
     try {
-      const success = await window.electronAPI.providers.delete(id)
-      if (success) {
-        store.removeProvider(id)
-        toast({
-          title: t('providers.deleteSuccess'),
-          description: t('providers.providerDeleted'),
-        })
-      }
+      await api.providers.delete(id)
+      store.removeProvider(id)
+      toast({
+        title: t('providers.deleteSuccess'),
+        description: t('providers.providerDeleted'),
+      })
     } catch (error) {
       toast({
         title: t('providers.deleteFailed'),
@@ -182,7 +148,7 @@ export function Providers() {
 
   const handleDuplicateProvider = async (id: string) => {
     try {
-      const newProvider = await window.electronAPI.providers.duplicate(id)
+      const newProvider = await api.providers.duplicate(id)
       store.addProvider(newProvider)
       toast({
         title: t('providers.duplicateSuccess'),
@@ -199,7 +165,7 @@ export function Providers() {
 
   const handleCheckProviderStatus = async (id: string) => {
     try {
-      const result = await window.electronAPI.providers.checkStatus(id)
+      const result = await api.providers.checkStatus(id)
       store.updateProviderStatus(id, result.status)
       toast({
         title: result.status === 'online' ? t('providers.providerOnline') : t('providers.providerOffline'),
@@ -218,7 +184,7 @@ export function Providers() {
   const handleCheckAllStatus = async () => {
     setIsRefreshing(true)
     try {
-      const statuses = await window.electronAPI.providers.checkAllStatus()
+      const statuses = await api.providers.checkAllStatus()
       const newStatusMap: Record<string, ProviderStatus> = {}
       for (const [id, result] of Object.entries(statuses)) {
         newStatusMap[id] = result.status
@@ -246,9 +212,9 @@ export function Providers() {
 
   const handleSelectBuiltinProvider = async (provider: BuiltinProviderConfig, credentials: Record<string, string>) => {
     let targetProvider = store.providers.find(p => p.id === provider.id)
-    
+
     if (!targetProvider) {
-      const newProvider = await window.electronAPI.providers.add({
+      const newProvider = await api.providers.add({
         id: provider.id,
         name: provider.name,
         type: 'builtin',
@@ -262,19 +228,19 @@ export function Providers() {
       store.addProvider(newProvider)
       targetProvider = newProvider
     }
-    
+
     if (credentials && Object.keys(credentials).length > 0) {
-      const account = await window.electronAPI.accounts.add({
+      const account = await api.accounts.add({
         providerId: targetProvider.id,
         name: `${provider.name} ${t('providers.accounts')}`,
         credentials: credentials,
       })
       store.addAccount(account)
-      
+
       const providerAccounts = store.getAccountsByProvider(targetProvider.id)
       store.updateAccountCount(targetProvider.id, providerAccounts.length, providerAccounts.filter(a => a.status === 'active').length)
     }
-    
+
     setShowAddProviderDialog(false)
     toast({
       title: t('providers.addSuccess'),
@@ -290,7 +256,7 @@ export function Providers() {
   const handleCustomProviderFormSubmit = async (data: CustomProviderFormData) => {
     try {
       if (editingProvider) {
-        const updated = await window.electronAPI.providers.update(editingProvider.id, {
+        const updated = await api.providers.update(editingProvider.id, {
           name: data.name,
           authType: data.authType,
           apiEndpoint: data.apiEndpoint,
@@ -306,7 +272,7 @@ export function Providers() {
           })
         }
       } else {
-        const newProvider = await window.electronAPI.providers.add({
+        const newProvider = await api.providers.add({
           name: data.name,
           authType: data.authType,
           apiEndpoint: data.apiEndpoint,
@@ -339,9 +305,9 @@ export function Providers() {
     dailyLimit?: number
   }) => {
     if (!store.selectedProviderId) return
-    
+
     try {
-      const account = await window.electronAPI.accounts.add({
+      const account = await api.accounts.add({
         providerId: store.selectedProviderId,
         name: data.name,
         email: data.email,
@@ -349,14 +315,14 @@ export function Providers() {
         dailyLimit: data.dailyLimit,
       })
       store.addAccount(account)
-      
+
       const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
       store.updateAccountCount(
         store.selectedProviderId,
         providerAccounts.length,
         providerAccounts.filter(a => a.status === 'active').length
       )
-      
+
       setShowAddAccountDialog(false)
       toast({
         title: t('providers.addSuccess'),
@@ -375,11 +341,11 @@ export function Providers() {
     try {
       const account = store.getAccountById(id)
       if (!account) return
-      
-      const updated = await window.electronAPI.accounts.update(id, updates)
+
+      const updated = await api.accounts.update(id, updates)
       if (updated) {
         store.updateAccount(id, updates)
-        
+
         if (store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
           store.updateAccountCount(
@@ -388,7 +354,7 @@ export function Providers() {
             providerAccounts.filter(a => a.status === 'active').length
           )
         }
-        
+
         toast({
           title: t('providers.updateSuccess'),
           description: t('providers.accountUpdated'),
@@ -405,11 +371,11 @@ export function Providers() {
 
   const handleDeleteAccount = async (id: string) => {
     try {
-      const success = await window.electronAPI.accounts.delete(id)
+      const success = await api.accounts.delete(id)
       if (success) {
         const account = store.getAccountById(id)
         store.removeAccount(id)
-        
+
         if (account && store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
           store.updateAccountCount(
@@ -418,7 +384,7 @@ export function Providers() {
             providerAccounts.filter(a => a.status === 'active').length
           )
         }
-        
+
         toast({
           title: t('providers.deleteSuccess'),
           description: t('providers.accountDeleted'),
@@ -435,10 +401,10 @@ export function Providers() {
 
   const handleValidateAccount = async (id: string) => {
     try {
-      const isValid = await window.electronAPI.accounts.validate(id)
-      if (isValid) {
+      const result = await api.accounts.validate(id)
+      if (result.valid) {
         store.updateAccount(id, { status: 'active' })
-        
+
         if (store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
           store.updateAccountCount(
@@ -447,14 +413,14 @@ export function Providers() {
             providerAccounts.filter(a => a.status === 'active').length
           )
         }
-        
+
         toast({
           title: t('providers.validateSuccess'),
           description: t('providers.credentialsValid'),
         })
       } else {
-        store.updateAccount(id, { status: 'error', errorMessage: t('providers.validateFailed') })
-        
+        store.updateAccount(id, { status: 'error', errorMessage: result.error || t('providers.validateFailed') })
+
         if (store.selectedProviderId) {
           const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
           store.updateAccountCount(
@@ -463,17 +429,17 @@ export function Providers() {
             providerAccounts.filter(a => a.status === 'active').length
           )
         }
-        
+
         toast({
           title: t('providers.validateFailed'),
-          description: t('providers.credentialsInvalid'),
+          description: result.error || t('providers.credentialsInvalid'),
           variant: 'destructive',
         })
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('providers.operationFailed')
       store.updateAccount(id, { status: 'error', errorMessage })
-      
+
       if (store.selectedProviderId) {
         const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
         store.updateAccountCount(
@@ -482,7 +448,7 @@ export function Providers() {
           providerAccounts.filter(a => a.status === 'active').length
         )
       }
-      
+
       toast({
         title: t('providers.validateFailed'),
         description: errorMessage,
@@ -492,7 +458,7 @@ export function Providers() {
   }
 
   const handleValidateToken = async (providerId: string, credentials: Record<string, string>) => {
-    return await window.electronAPI.accounts.validateToken(providerId, credentials)
+    return await api.accounts.validateToken(providerId, credentials)
   }
 
   const handleViewAccountDetail = (account: Account) => {
@@ -502,9 +468,9 @@ export function Providers() {
 
   const handleAccountStatusChange = async (id: string, status: AccountStatus) => {
     try {
-      await window.electronAPI.accounts.update(id, { status })
+      await api.accounts.update(id, { status })
       store.updateAccount(id, { status })
-      
+
       if (store.selectedProviderId) {
         const providerAccounts = store.getAccountsByProvider(store.selectedProviderId)
         store.updateAccountCount(
@@ -513,7 +479,7 @@ export function Providers() {
           providerAccounts.filter(a => a.status === 'active').length
         )
       }
-      
+
       toast({
         title: t('providers.statusUpdated'),
         description: t('providers.accountStatusChanged', { status }),
@@ -554,16 +520,16 @@ export function Providers() {
     )
   }
 
-  const selectedProvider = store.selectedProviderId 
-    ? store.getProviderById(store.selectedProviderId) 
+  const selectedProvider = store.selectedProviderId
+    ? store.getProviderById(store.selectedProviderId)
     : null
 
-  const selectedAccount = store.selectedAccountId 
-    ? store.getAccountById(store.selectedAccountId) 
+  const selectedAccount = store.selectedAccountId
+    ? store.getAccountById(store.selectedAccountId)
     : null
 
-  const providerAccounts = store.selectedProviderId 
-    ? store.getAccountsByProvider(store.selectedProviderId) 
+  const providerAccounts = store.selectedProviderId
+    ? store.getAccountsByProvider(store.selectedProviderId)
     : []
 
   if (viewMode === 'account-detail' && selectedAccount && selectedProvider) {
@@ -613,7 +579,7 @@ export function Providers() {
           providerId={selectedProvider.id}
           onAddAccount={() => setShowAddAccountDialog(true)}
           onEditAccount={async (account) => {
-            const fullAccount = await window.electronAPI.accounts.getById(account.id, true)
+            const fullAccount = await api.accounts.getById(account.id, true)
             setEditingAccount(fullAccount || account)
             setShowAddAccountDialog(true)
           }}

@@ -66,7 +66,7 @@ export function createProvidersRouter() {
     const providers = ProviderManager.getAll()
     const results: Record<string, any> = {}
     
-    const { ProviderChecker } = await import('../../main/providers/checker')
+    const { ProviderChecker } = await import('../../core/providers/checker')
     
     await Promise.all(providers.map(async (provider) => {
       const result = await ProviderChecker.checkProviderStatus(provider)

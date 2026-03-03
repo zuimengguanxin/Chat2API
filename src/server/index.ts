@@ -33,9 +33,19 @@ if (existsSync(staticPath)) {
   app.use(serve(staticPath))
 }
 
-router.get('(.*)', async (ctx) => {
+// Wildcard route for SPA fallback - must be last after all other routes
+app.use(async (ctx, next) => {
+  // Skip if it's an API route or static file
+  if (ctx.path.startsWith('/api') || ctx.path.includes('.')) {
+    return next()
+  }
+
   ctx.type = 'html'
-  ctx.body = `<!DOCTYPE html>
+  const devMode = process.env.NODE_ENV !== 'production'
+
+  if (devMode) {
+    // Development: Use Vite dev server script
+    ctx.body = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -44,9 +54,34 @@ router.get('(.*)', async (ctx) => {
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+  <script type="module" src="http://localhost:5173/src/main.tsx"></script>
 </body>
 </html>`
+  } else {
+    // Production: Serve the built HTML file
+    const staticPath = join(process.cwd(), 'dist', 'web')
+    if (existsSync(staticPath)) {
+      const fs = await import('fs')
+      const indexPath = join(staticPath, 'index.html')
+      if (existsSync(indexPath)) {
+        ctx.body = fs.readFileSync(indexPath, 'utf-8')
+        return
+      }
+    }
+    // Fallback HTML for when build files don't exist
+    ctx.body = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat2API</title>
+</head>
+<body>
+  <div id="root"></div>
+  <p>Frontend not built. Please run <code>npm run build</code> first.</p>
+</body>
+</html>`
+  }
 })
 
 wss.on('connection', (ws) => {

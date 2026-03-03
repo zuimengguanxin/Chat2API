@@ -23,14 +23,12 @@ interface UpdateInfo {
 
 export function About() {
   const { t } = useTranslation()
-  const [appVersion, setAppVersion] = useState<string>('1.0.0')
+  // Web version doesn't have getVersion, use package version
+  const [appVersion, setAppVersion] = useState<string>(process.env.npm_package_version || '1.0.0')
 
   useEffect(() => {
-    if (window.electronAPI?.app?.getVersion) {
-      window.electronAPI.app.getVersion().then((v: string) => {
-        if (v) setAppVersion(v)
-      })
-    }
+    // In Web version, version is loaded from environment or package.json
+    // This is handled during build time
   }, [])
 
   const [appUpdateStatus, setAppUpdateStatus] = useState<{
@@ -67,19 +65,11 @@ export function About() {
 
   const handleDownloadAppUpdate = () => {
     const url = appUpdateStatus.result?.releaseUrl || 'https://github.com/xiaoY233/Chat2API/releases'
-    if (window.electronAPI?.app?.openExternal) {
-      window.electronAPI.app.openExternal(url)
-    } else {
-      window.open(url, '_blank')
-    }
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const handleOpenExternal = (url: string) => {
-    if (window.electronAPI?.app?.openExternal) {
-      window.electronAPI.app.openExternal(url)
-    } else {
-      window.open(url, '_blank')
-    }
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const links = [

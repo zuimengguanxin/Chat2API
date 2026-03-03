@@ -10,6 +10,12 @@ export function createAccountsRouter() {
     ctx.body = AccountManager.getAll(includeCredentials === 'true')
   })
 
+  // NOTE: This route must be defined before /:id to avoid path matching issues
+  router.get('/provider/:providerId', async (ctx) => {
+    const { includeCredentials } = ctx.query
+    ctx.body = AccountManager.getByProviderId(ctx.params.providerId, includeCredentials === 'true')
+  })
+
   router.get('/:id', async (ctx) => {
     const { includeCredentials } = ctx.query
     const account = AccountManager.getById(ctx.params.id, includeCredentials === 'true')
@@ -19,11 +25,6 @@ export function createAccountsRouter() {
       return
     }
     ctx.body = account
-  })
-
-  router.get('/provider/:providerId', async (ctx) => {
-    const { includeCredentials } = ctx.query
-    ctx.body = AccountManager.getByProviderId(ctx.params.providerId, includeCredentials === 'true')
   })
 
   router.post('/', async (ctx) => {
@@ -84,7 +85,7 @@ export function createAccountsRouter() {
     }
     
     try {
-      const { ProviderChecker } = await import('../../main/providers/checker')
+      const { ProviderChecker } = await import('../../core/providers/checker')
       ctx.body = await ProviderChecker.checkAccountToken(provider, tempAccount)
     } catch (error: any) {
       ctx.body = { valid: false, error: error.message }

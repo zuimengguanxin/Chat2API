@@ -32,6 +32,8 @@ import {
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { api, wsClient } from '@/api'
+import { useLogsStore } from '@/stores/logsStore'
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 
@@ -52,99 +54,47 @@ const levelConfig: Record<LogLevel, { icon: React.ElementType; className: string
 
 export default function LogsPage() {
   const { t } = useTranslation()
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const {
+    logs,
+    filteredLogs,
+    filter,
+    isLoading,
+    clearLogs,
+    exportLogs,
+    setFilter,
+    refresh,
+  } = useLogsStore()
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const logsRef = useRef<LogEntry[]>([])
 
   useEffect(() => {
-    if (!window.electronAPI?.logs?.onNewLog) return
-
-    const unsubscribe = window.electronAPI.logs.onNewLog((newLog: LogEntry) => {
-      logsRef.current = [...logsRef.current.slice(-999), newLog]
-      setLogs([...logsRef.current])
-    })
-
-    window.electronAPI.logs.get().then((allLogs: LogEntry[]) => {
-      logsRef.current = allLogs
-      setLogs(allLogs)
-    })
-
-    return unsubscribe
-  }, [])
-
-  const filteredLogs = logs.filter((log) => {
-    if (levelFilter !== 'all' && log.level !== levelFilter) return false
-    if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false
-    }
-    return true
-  })
+    refresh()
+  }, [refresh])
 
   const handleClearLogs = async () => {
-    setIsLoading(true)
-    try {
-      if (window.electronAPI?.logs?.clear) {
-        await window.electronAPI.logs.clear()
-        logsRef.current = []
-        setLogs([])
-        toast({
-          title: t('logs.clearSuccess'),
-          description: t('logs.allLogsCleared'),
-        })
-      }
-    } catch (error) {
-      toast({
-        title: t('logs.clearFailed'),
-        description: t('logs.cannotClearLogs'),
-        variant: 'destructive',
-      })
-    } finally {
-      setIsLoading(false)
-      setShowClearConfirm(false)
-    }
+    await clearLogs()
+    setShowClearConfirm(false)
   }
 
   const handleExportLogs = async (format: 'json' | 'txt') => {
-    setIsLoading(true)
+    setIsExporting(true)
     try {
-      if (window.electronAPI?.logs?.export) {
-        const content = await window.electronAPI.logs.export(format)
-        const blob = new Blob([content], { 
-          type: format === 'json' ? 'application/json' : 'text/plain' 
-        })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `logs-${new Date().toISOString().slice(0, 10)}.${format === 'json' ? 'json' : 'txt'}`
-        a.click()
-        URL.revokeObjectURL(url)
-        toast({
-          title: t('logs.exportSuccess'),
-          description: t('logs.logsExportedAs', { format: format.toUpperCase() }),
-        })
-      } else {
-        const content = format === 'json' 
-          ? JSON.stringify(filteredLogs, null, 2)
-          : filteredLogs.map(l => `[${new Date(l.timestamp).toISOString()}] [${l.level.toUpperCase()}] ${l.message}`).join('\n')
-        const blob = new Blob([content], { 
-          type: format === 'json' ? 'application/json' : 'text/plain' 
-        })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `logs-${new Date().toISOString().slice(0, 10)}.${format === 'json' ? 'json' : 'txt'}`
-        a.click()
-        URL.revokeObjectURL(url)
-        toast({
-          title: t('logs.exportSuccess'),
-          description: t('logs.logsExportedAs', { format: format.toUpperCase() }),
-        })
-      }
+      const content = await exportLogs(format)
+      const blob = new Blob([content], {
+        type: format === 'json' ? 'application/json' : 'text/plain'
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `logs-${new Date().toISOString().slice(0, 10)}.${format === 'json' ? 'json' : 'txt'}`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast({
+        title: t('logs.exportSuccess'),
+        description: t('logs.logsExportedAs', { format: format.toUpperCase() }),
+      })
     } catch (error) {
       toast({
         title: t('logs.exportFailed'),
@@ -152,7 +102,7 @@ export default function LogsPage() {
         variant: 'destructive',
       })
     } finally {
-      setIsLoading(false)
+      setIsExporting(false)
       setShowExportDialog(false)
     }
   }
@@ -193,7 +143,7 @@ export default function LogsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowExportDialog(true)}
-                disabled={logs.length === 0}
+                disabled={filteredLogs.length === 0}
               >
                 <Download className="h-4 w-4 mr-2" />
                 {t('logs.exportLogs')}
@@ -202,7 +152,7 @@ export default function LogsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowClearConfirm(true)}
-                disabled={logs.length === 0}
+                disabled={filteredLogs.length === 0}
               >
                 <Trash2 className="h-4 w-4 mr-2" />
                 {t('logs.clearLogs')}
@@ -216,14 +166,14 @@ export default function LogsPage() {
               <Search className="h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={t('logs.search')}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={filter.keyword}
+                onChange={(e) => setFilter({ keyword: e.target.value })}
                 className="flex-1"
               />
             </div>
             <Select
-              value={levelFilter}
-              onValueChange={(value) => setLevelFilter(value as LogLevel | 'all')}
+              value={filter.level}
+              onValueChange={(value) => setFilter({ level: value as LogLevel | 'all' })}
             >
               <SelectTrigger className="w-[120px]">
                 <SelectValue placeholder={t('logs.level')} />
@@ -256,8 +206,8 @@ export default function LogsPage() {
                         'flex items-start gap-2 p-2 rounded-md hover:bg-muted/50 transition-colors',
                       )}
                     >
-                      <Badge 
-                        variant="outline" 
+                      <Badge
+                        variant="outline"
                         className={cn('shrink-0 gap-1', config.className)}
                       >
                         <Icon className="h-3 w-3" />
@@ -288,8 +238,8 @@ export default function LogsPage() {
             <Button variant="outline" onClick={() => setShowClearConfirm(false)}>
               {t('common.cancel')}
             </Button>
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               onClick={handleClearLogs}
               disabled={isLoading}
             >
@@ -312,7 +262,7 @@ export default function LogsPage() {
               className="flex-1"
               variant="outline"
               onClick={() => handleExportLogs('json')}
-              disabled={isLoading}
+              disabled={isExporting}
             >
               <Download className="h-4 w-4 mr-2" />
               {t('logs.jsonFormat')}
@@ -321,7 +271,7 @@ export default function LogsPage() {
               className="flex-1"
               variant="outline"
               onClick={() => handleExportLogs('txt')}
-              disabled={isLoading}
+              disabled={isExporting}
             >
               <Download className="h-4 w-4 mr-2" />
               {t('logs.textFormat')}

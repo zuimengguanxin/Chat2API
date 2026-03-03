@@ -1,6 +1,7 @@
 /**
- * OAuth Login Dialog Component
- * Provides unified OAuth login interface for multiple providers
+ * OAuth Login Dialog Component - Web Version
+ * Provides manual token input interface for multiple providers
+ * NOTE: OAuth browser login is not available in Web version
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -14,18 +15,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TokenInput } from './TokenInput'
 import { OAuthProgress, OAuthProgressStatus } from './OAuthProgress'
-import { ExternalLink, AlertCircle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
+import { api } from '@/api'
 
 type ProviderType = 'deepseek' | 'glm' | 'kimi' | 'minimax' | 'qwen' | 'zai'
-
-interface OAuthLoginResult {
-  success: boolean
-  credentials?: Record<string, string>
-  error?: string
-}
 
 interface ManualTokenConfig {
   providerType: ProviderType
@@ -151,7 +146,6 @@ export interface LoginDialogProps {
   providerId: string
   providerType: ProviderType
   providerName?: string
-  defaultTab?: 'manual' | 'browser'
   onSuccess?: (credentials: Record<string, string>) => void
   onError?: (error: string) => void
 }
@@ -162,12 +156,10 @@ export function LoginDialog({
   providerId,
   providerType,
   providerName,
-  defaultTab = 'manual',
   onSuccess,
   onError,
 }: LoginDialogProps) {
   const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState<string>(defaultTab)
   const [token, setToken] = useState('')
   const [realUserID, setRealUserID] = useState('') // For MiniMax
   const [tokenType, setTokenType] = useState<string>('')
@@ -192,45 +184,19 @@ export function LoginDialog({
     }
   }, [config])
 
-  useEffect(() => {
-    const unsubscribe = window.electronAPI?.on('oauth:progress', (data: unknown) => {
-      const event = data as { status: OAuthProgressStatus; message: string; progress?: number }
-      setProgress({
-        status: event.status,
-        message: event.message,
-        progress: event.progress,
-      })
-    })
-    
-    return () => {
-      unsubscribe?.()
-    }
-  }, [])
-
   const resetState = useCallback(() => {
     setToken('')
     setRealUserID('')
     setError('')
     setIsLoading(false)
     setProgress({ status: 'idle', message: '' })
-    setActiveTab(defaultTab)
-  }, [defaultTab])
+  }, [])
 
   useEffect(() => {
     if (open) {
       resetState()
     }
   }, [open, resetState])
-
-  const handleOpenBrowser = async () => {
-    if (!config?.loginUrl) return
-    
-    try {
-      await window.electronAPI?.invoke('app:openExternal', config.loginUrl)
-    } catch (err) {
-      setError(t('oauth.cannotOpenBrowser'))
-    }
-  }
 
   const handleManualSubmit = async () => {
     if (!token.trim()) {
@@ -243,23 +209,25 @@ export function LoginDialog({
     setProgress({ status: 'pending', message: t('oauth.validatingToken') })
 
     try {
-      const result = await window.electronAPI?.invoke('oauth:loginWithToken', {
-        providerId,
-        providerType,
+      // Validate token via API
+      const credentials: Record<string, string> = {
         token,
-        realUserID: isMiniMax ? realUserID.trim() : undefined,
-      }) as OAuthLoginResult | undefined
+      }
+      if (isMiniMax && realUserID.trim()) {
+        credentials.realUserID = realUserID.trim()
+      }
 
-      if (result?.success) {
+      const result = await api.accounts.validateToken(providerId, credentials)
+
+      if (result.valid) {
         setProgress({ status: 'success', message: t('oauth.loginSuccess') })
-        onSuccess?.(result.credentials || {})
+        onSuccess?.(credentials)
         setTimeout(() => onOpenChange(false), 1500)
       } else {
-        const errorMsg = result?.error || t('oauth.loginFailed')
-        const translatedError = errorMsg === 'Login timeout' ? t('oauth.loginTimeout') : errorMsg
-        setProgress({ status: 'error', message: translatedError })
-        setError(translatedError)
-        onError?.(translatedError)
+        const errorMsg = result.error || t('oauth.loginFailed')
+        setProgress({ status: 'error', message: errorMsg })
+        setError(errorMsg)
+        onError?.(errorMsg)
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : t('oauth.unknownError')
@@ -281,90 +249,59 @@ export function LoginDialog({
             {t('oauth.loginTo', { provider: displayName })}
           </DialogTitle>
           <DialogDescription>
-            {t('oauth.selectLoginMethod')}
+            {t('oauth.enterTokenManually')}
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="manual">{t('oauth.manualInput')}</TabsTrigger>
-            <TabsTrigger value="browser">{t('oauth.browserLogin')}</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="manual" className="mt-4 space-y-4">
-            {config?.manualTokenConfigs.length && config.manualTokenConfigs.length > 1 && !isMiniMax && (
-              <div className="flex gap-2">
-                {config.manualTokenConfigs.map((tc) => (
-                  <Button
-                    key={tc.tokenType}
-                    type="button"
-                    variant={tokenType === tc.tokenType ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setTokenType(tc.tokenType)}
-                  >
-                    {t(tc.labelKey)}
-                  </Button>
-                ))}
-              </div>
-            )}
-
-            {currentTokenConfig && (
-              <TokenInput
-                label={t(currentTokenConfig.labelKey)}
-                placeholder={t(currentTokenConfig.placeholderKey)}
-                description={t(currentTokenConfig.descriptionKey)}
-                helpUrl={currentTokenConfig.helpUrl}
-                value={token}
-                onChange={setToken}
-                onSubmit={handleManualSubmit}
-                disabled={isLoading}
-                error={error}
-              />
-            )}
-
-            {isMiniMax && (
-              <TokenInput
-                label={t('minimax.realUserID')}
-                placeholder={t('minimax.realUserIDPlaceholder')}
-                description={t('minimax.realUserIDHelp')}
-                helpUrl="https://agent.minimaxi.com"
-                value={realUserID}
-                onChange={setRealUserID}
-                onSubmit={handleManualSubmit}
-                disabled={isLoading}
-              />
-            )}
-
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <AlertCircle className="h-4 w-4" />
-              <span>{t('oauth.tokenStoredLocally')}</span>
+        <div className="mt-4 space-y-4">
+          {config?.manualTokenConfigs.length && config.manualTokenConfigs.length > 1 && !isMiniMax && (
+            <div className="flex gap-2">
+              {config.manualTokenConfigs.map((tc) => (
+                <Button
+                  key={tc.tokenType}
+                  type="button"
+                  variant={tokenType === tc.tokenType ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setTokenType(tc.tokenType)}
+                >
+                  {t(tc.labelKey)}
+                </Button>
+              ))}
             </div>
-          </TabsContent>
+          )}
 
-          <TabsContent value="browser" className="mt-4">
-            <div className="flex flex-col items-center justify-center space-y-4 py-8">
-              <p className="text-center text-sm text-muted-foreground">
-                {t('oauth.clickToOpenBrowser')}
-              </p>
-              
-              <Button onClick={handleOpenBrowser} className="gap-2">
-                <ExternalLink className="h-4 w-4" />
-                {t('oauth.openLoginPage', { provider: displayName })}
-              </Button>
+          {currentTokenConfig && (
+            <TokenInput
+              label={t(currentTokenConfig.labelKey)}
+              placeholder={t(currentTokenConfig.placeholderKey)}
+              description={t(currentTokenConfig.descriptionKey)}
+              helpUrl={currentTokenConfig.helpUrl}
+              value={token}
+              onChange={setToken}
+              onSubmit={handleManualSubmit}
+              disabled={isLoading}
+              error={error}
+            />
+          )}
 
-              <div className="mt-4 space-y-2 text-center">
-                <p className="text-sm font-medium">{t('oauth.getTokenSteps')}</p>
-                <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1">
-                  <li>{t('oauth.step1')}</li>
-                  <li>{t('oauth.step2')}</li>
-                  <li>{t('oauth.step3')}</li>
-                  <li>{t('oauth.step4')}</li>
-                  <li>{t('oauth.step5')}</li>
-                </ol>
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+          {isMiniMax && (
+            <TokenInput
+              label={t('minimax.realUserID')}
+              placeholder={t('minimax.realUserIDPlaceholder')}
+              description={t('minimax.realUserIDHelp')}
+              helpUrl="https://agent.minimaxi.com"
+              value={realUserID}
+              onChange={setRealUserID}
+              onSubmit={handleManualSubmit}
+              disabled={isLoading}
+            />
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <AlertCircle className="h-4 w-4" />
+            <span>{t('oauth.tokenStoredLocally')}</span>
+          </div>
+        </div>
 
         {progress.status !== 'idle' && (
           <OAuthProgress
@@ -383,14 +320,12 @@ export function LoginDialog({
           >
             {t('common.cancel')}
           </Button>
-          {activeTab === 'manual' && (
-            <Button
-              onClick={handleManualSubmit}
-              disabled={isLoading || !token.trim()}
-            >
-              {isLoading ? t('oauth.validating') : t('oauth.confirmLogin')}
-            </Button>
-          )}
+          <Button
+            onClick={handleManualSubmit}
+            disabled={isLoading || !token.trim()}
+          >
+            {isLoading ? t('oauth.validating') : t('oauth.confirmLogin')}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

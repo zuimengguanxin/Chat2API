@@ -25,6 +25,7 @@ import {
 import { useProxyStore } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
 import type { ModelMapping, Provider, Account } from '@/types/electron'
+import { api } from '@/api'
 import { ArrowRight, Plus, Pencil, Trash2, Search, Sparkles } from 'lucide-react'
 
 interface ModelMappingConfigProps {
@@ -84,7 +85,7 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
 
   const fetchProviders = async () => {
     try {
-      const data = await window.electronAPI.providers.getAll()
+      const data = await api.providers.getAll()
       setProviders(data.filter(p => p.enabled))
     } catch (error) {
       console.error('Failed to fetch providers:', error)
@@ -93,8 +94,8 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
 
   const fetchAccounts = async () => {
     try {
-      const data = await window.electronAPI.accounts.getAll()
-      setAccounts(data.filter(a => a.status === 'active'))
+      const data = await api.accounts.getAll()
+      setAccounts(data.filter((a) => a.status === 'active'))
     } catch (error) {
       console.error('Failed to fetch accounts:', error)
     }

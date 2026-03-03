@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3'
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js'
 import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import crypto from 'crypto'
 
 const ALGORITHM = 'aes-256-gcm'
@@ -86,16 +86,25 @@ function getDbPath(): string {
   return join(dataDir, 'chat2api.db')
 }
 
-let db: Database.Database | null = null
+let db: SqlJsDatabase | null = null
+let SQL: any = null
 
-export function initStorage(): void {
+export async function initStorage(): Promise<void> {
   const dbPath = getDbPath()
   console.log('Database path:', dbPath)
   
-  db = new Database(dbPath)
-  db.pragma('journal_mode = WAL')
+  SQL = await initSqlJs()
   
-  db.exec(`
+  if (existsSync(dbPath)) {
+    const fileBuffer = readFileSync(dbPath)
+    db = new SQL.Database(fileBuffer)
+  } else {
+    db = new SQL.Database()
+  }
+  
+  db.run(`PRAGMA journal_mode = WAL`)
+  
+  db.run(`
     CREATE TABLE IF NOT EXISTS providers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -112,8 +121,10 @@ export function initStorage(): void {
       last_status_check INTEGER,
       created_at INTEGER,
       updated_at INTEGER
-    );
-    
+    )
+  `)
+  
+  db.run(`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
       provider_id TEXT NOT NULL,
@@ -128,13 +139,17 @@ export function initStorage(): void {
       created_at INTEGER,
       updated_at INTEGER,
       FOREIGN KEY (provider_id) REFERENCES providers(id)
-    );
-    
+    )
+  `)
+  
+  db.run(`
     CREATE TABLE IF NOT EXISTS config (
       key TEXT PRIMARY KEY,
       value TEXT
-    );
-    
+    )
+  `)
+  
+  db.run(`
     CREATE TABLE IF NOT EXISTS logs (
       id TEXT PRIMARY KEY,
       level TEXT NOT NULL,
@@ -144,13 +159,17 @@ export function initStorage(): void {
       provider_id TEXT,
       request_id TEXT,
       data TEXT
-    );
+    )
+  `)
 
+  db.run(`
     CREATE TABLE IF NOT EXISTS auth (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       password_hash TEXT NOT NULL
-    );
+    )
+  `)
 
+  db.run(`
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -160,7 +179,7 @@ export function initStorage(): void {
       created_at INTEGER,
       last_used_at INTEGER,
       usage_count INTEGER DEFAULT 0
-    );
+    )
   `)
   
   const defaultConfig = {
@@ -179,20 +198,109 @@ export function initStorage(): void {
     modelMappings: {},
   }
   
-  const insertConfig = db.prepare('INSERT OR IGNORE INTO config (key, value) VALUES (?, ?)')
   for (const [key, value] of Object.entries(defaultConfig)) {
-    insertConfig.run(key, JSON.stringify(value))
+    const existing = db.exec(`SELECT value FROM config WHERE key = ?`, [key])
+    if (existing.length === 0 || existing[0].values.length === 0) {
+      db.run(`INSERT INTO config (key, value) VALUES (?, ?)`, [key, JSON.stringify(value)])
+    }
+  }
+  
+  saveDatabase()
+}
+
+function saveDatabase(): void {
+  if (db) {
+    const data = db.export()
+    const buffer = Buffer.from(data)
+    const dbPath = getDbPath()
+    writeFileSync(dbPath, buffer)
   }
 }
 
-export function getDb(): Database.Database {
+export function getDb(): SqlJsDatabase {
   if (!db) throw new Error('Database not initialized')
-  return db
+  // Patch the database object to support better-sqlite3-like API
+  return patchDatabase(db)
+}
+
+// Patch sql.js Database to support better-sqlite3-like API
+function patchDatabase(database: SqlJsDatabase): any {
+  // If already patched, return as-is
+  if ((database as any)._patched) return database
+
+  // Store original methods
+  const originalPrepare = database.prepare.bind(database)
+  const originalRun = database.run.bind(database)
+  const originalExec = database.exec.bind(database)
+
+  // Wrap run() to auto-save after write operations
+  database.run = function(sql: string, params?: any[]) {
+    const isWriteStatement = /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
+    const result = originalRun(sql, params || [])
+    if (isWriteStatement) {
+      saveDatabase()
+    }
+    return result
+  }
+
+  // Add prepare method that supports chaining with all()/get()/run()
+  (database as any).prepare = function(sql: string) {
+    const stmt = originalPrepare(sql)
+    const isWriteStatement = /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
+
+    return {
+      all: function(...params: any[]) {
+        stmt.bind(params)
+        const results: any[] = []
+        while (stmt.step()) {
+          results.push(stmt.getAsObject())
+        }
+        stmt.free()
+        return results
+      },
+      get: function(...params: any[]) {
+        stmt.bind(params)
+        if (stmt.step()) {
+          const result = stmt.getAsObject()
+          stmt.free()
+          return result
+        }
+        stmt.free()
+        return null
+      },
+      run: function(...params: any[]) {
+        // Use db.run for write operations
+        database.run(sql, params)
+        return { changes: 1, lastInsertRowid: 0 } // sql.js doesn't provide exact count
+      },
+      free: function() {
+        // sql.js manages statement lifecycle differently
+      }
+    }
+  }
+
+  // Wrap exec() to auto-save after write operations
+  database.exec = function(sql: string | string[]) {
+    const result = originalExec(sql)
+    // Check if any write operation was performed
+    const sqlText = Array.isArray(sql) ? sql.join(';') : sql
+    if (/^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/mi.test(sqlText)) {
+      saveDatabase()
+    }
+    return result
+  }
+
+  // Mark as patched
+  (database as any)._patched = true
+  return database
 }
 
 export function closeStorage(): void {
   if (db) {
+    saveDatabase()
     db.close()
     db = null
   }
 }
+
+export { saveDatabase }

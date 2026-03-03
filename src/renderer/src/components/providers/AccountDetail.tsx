@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import type { Account, AccountStatus, Provider } from '@/types/electron'
 import { cn } from '@/lib/utils'
+import { api } from '@/api'
 
 interface AccountDetailProps {
   account: Account
@@ -70,7 +71,7 @@ export function AccountDetail({
   useEffect(() => {
     const fetchTrendData = async () => {
       try {
-        const trend = await window.electronAPI.logs.getAccountTrend(account.id, 7)
+        const trend = await api.logs.getAccountTrend(account.id, 7)
         console.log('Account trend data:', trend)
         setTrendData(trend)
       } catch (error) {
@@ -166,10 +167,10 @@ export function AccountDetail({
 
   const handleGetCredits = async () => {
     if (!isMiniMaxProvider) return
-    
+
     setIsLoadingCredits(true)
     try {
-      const result = await window.electronAPI.accounts.getCredits(account.id)
+      const result = await api.accounts.getCredits(account.id)
       setCredits(result)
     } catch (error) {
       console.error('Failed to get credits:', error)

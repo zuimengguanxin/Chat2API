@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ExternalLink, Loader2, Check, Copy, AlertCircle } from 'lucide-react'
 import type { BuiltinProviderConfig } from '@/types/electron'
+import { api } from '@/api'
 import deepseekIcon from '@/assets/providers/deepseek.svg'
 import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
@@ -168,7 +169,7 @@ export function LoginGuideDialog({
   const handleOpenBrowser = async () => {
     if (guide?.loginUrl) {
       try {
-        await window.electronAPI?.app.openExternal(guide.loginUrl)
+        window.open(guide.loginUrl, '_blank', 'noopener,noreferrer')
       } catch (err) {
         console.error('Failed to open browser:', err)
         setError(t('loginGuide.openBrowserFailedDesc', { url: guide.loginUrl }))

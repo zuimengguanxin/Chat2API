@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ProxyStatus, ProxyStatistics, Provider, Account, ProviderCheckResult, LogEntry } from '@/types/electron'
 import type { ProviderStats, ActivityItem, ChartDataPoint } from '@/components/dashboard'
+import { api, wsClient } from '@/api'
 
 interface DashboardStats {
   totalRequests: number
@@ -47,12 +48,12 @@ interface DashboardState {
 const convertLogsToActivities = (logs: LogEntry[], providers: Provider[]): ActivityItem[] => {
   return logs.slice(0, 10).map(log => {
     const provider = log.providerId ? providers.find(p => p.id === log.providerId) : undefined
-    
+
     let type: ActivityItem['type'] = 'info'
     if (log.level === 'error') type = 'error'
     else if (log.level === 'warn') type = 'warning'
     else if (log.level === 'info' && log.message.includes('success')) type = 'success'
-    
+
     return {
       id: log.id,
       type,
@@ -108,28 +109,28 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
   refreshData: async () => {
     const { setLoading, setError, setProxyStatus, setStatistics, setStats, setProviders, setActivities, setChartData } = get()
-    
+
     setLoading(true)
     setError(null)
 
     try {
-      const proxyStatusPromise = window.electronAPI?.proxy?.getStatus?.() ?? Promise.resolve(null)
-      const statisticsPromise = window.electronAPI?.invoke?.('proxy:getStatistics') ?? Promise.resolve(null)
-      const providersPromise = window.electronAPI?.providers?.getAll?.() ?? Promise.resolve([])
-      const accountsPromise = window.electronAPI?.accounts?.getAll?.() ?? Promise.resolve([])
-      const providerStatusPromise = window.electronAPI?.providers?.checkAllStatus?.() ?? Promise.resolve({})
-      const logsPromise = window.electronAPI?.logs?.get?.({ limit: 10 }) ?? Promise.resolve([])
-      const trendPromise = window.electronAPI?.logs?.getTrend?.(7) ?? Promise.resolve([])
-
       const [proxyStatus, statistics, providers, accounts, providerStatuses, logs, trends] = await Promise.all([
-        proxyStatusPromise,
-        statisticsPromise,
-        providersPromise,
-        accountsPromise,
-        providerStatusPromise,
-        logsPromise,
-        trendPromise,
-      ]) as [ProxyStatus | null, ProxyStatistics | null, Provider[], Account[], Record<string, ProviderCheckResult>, LogEntry[], LogTrend[]]
+        api.proxy.getStatus().catch(() => null),
+        api.proxy.getStatistics().catch(() => null),
+        api.providers.getAll().catch(() => []),
+        api.accounts.getAll().catch(() => []),
+        api.providers.checkAllStatus().catch(() => ({})),
+        api.logs.get({ limit: 10 }).catch(() => []),
+        api.logs.getTrend(7).catch(() => []),
+      ]) as [
+        ProxyStatus | null,
+        ProxyStatistics | null,
+        Provider[],
+        Account[],
+        Record<string, ProviderCheckResult>,
+        LogEntry[],
+        LogTrend[]
+      ]
 
       setProxyStatus(proxyStatus)
       setStatistics(statistics)
@@ -191,7 +192,7 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         const status = providerStatuses?.[provider.id]
         const providerAccounts = accounts?.filter((a: Account) => a.providerId === provider.id) ?? []
         const accountUsage = providerAccounts.reduce((sum: number, a: Account) => sum + (a.requestCount ?? 0), 0)
-        
+
         return {
           id: provider.id,
           name: provider.name,

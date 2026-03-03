@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useProxyStore, type AccountWeight } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
 import type { LoadBalanceStrategy, Account, Provider } from '@/types/electron'
+import { api } from '@/api'
 import { Scale, RefreshCw, Info } from 'lucide-react'
 
 interface LoadBalanceConfigProps {
@@ -48,26 +49,28 @@ export function LoadBalanceConfig({ onConfigChange }: LoadBalanceConfigProps) {
 
   const fetchAccounts = async () => {
     try {
-      const allAccounts = await window.electronAPI.accounts.getAll()
-      const providers = await window.electronAPI.providers.getAll()
-      
-      const accountsWithProvider = allAccounts.map(account => ({
+      const [allAccounts, providers] = await Promise.all([
+        api.accounts.getAll(),
+        api.providers.getAll()
+      ])
+
+      const accountsWithProvider = allAccounts.map((account) => ({
         ...account,
         provider: providers.find(p => p.id === account.providerId),
       }))
-      
+
       setAccounts(accountsWithProvider)
-      
+
       const defaultWeights = accountsWithProvider.map(account => ({
         accountId: account.id,
         weight: 100,
       }))
-      
+
       const mergedWeights = defaultWeights.map(dw => {
         const existing = accountWeights.find(w => w.accountId === dw.accountId)
         return existing || dw
       })
-      
+
       setWeights(mergedWeights)
     } catch (error) {
       console.error(t('proxy.failedToGetAccounts'), error)

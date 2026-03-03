@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress'
 import { useProxyStore } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
 import type { ProxyStatistics } from '@/types/electron'
+import { api } from '@/api'
 import {
   Activity,
   Play,
@@ -96,7 +97,7 @@ export function ProxyStatus({ onStatusChange }: ProxyStatusProps) {
 
   const handleResetStatistics = async () => {
     try {
-      await window.electronAPI.invoke('proxy:resetStatistics')
+      await api.proxy.resetStatistics()
       await fetchProxyStatistics()
       toast({
         title: t('common.success'),

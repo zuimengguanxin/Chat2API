@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { useSettingsStore, LogLevel } from '@/stores/settingsStore'
 import { useToast } from '@/hooks/use-toast'
 import { Database, Download, Upload, Trash2, RotateCcw, AlertTriangle } from 'lucide-react'
+import { api } from '@/api'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
@@ -113,11 +114,10 @@ export function DataManagement() {
     try {
       localStorage.clear()
       sessionStorage.clear()
-      
-      if (window.electronAPI?.store?.clearAll) {
-        await window.electronAPI.store.clearAll()
-      }
-      
+
+      // Call API to reset server-side data
+      await api.config.reset()
+
       toast({
         title: t('common.success'),
         description: t('settings.resetSuccess'),

@@ -11,7 +11,7 @@ import {
   RecentActivity,
 } from '@/components/dashboard'
 import { useDashboardStore } from '@/stores/dashboardStore'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { useProxyStore } from '@/stores/proxyStore'
 import { cn } from '@/lib/utils'
 
 export function Dashboard() {
@@ -28,57 +28,39 @@ export function Dashboard() {
     lastUpdated,
     refreshData,
   } = useDashboardStore()
-  const { proxyEnabled, setProxyEnabled } = useSettingsStore()
+  const { startProxy, stopProxy, fetchProxyStatus } = useProxyStore()
   const hasLoadedRef = useRef(false)
 
   useEffect(() => {
     if (!hasLoadedRef.current) {
       hasLoadedRef.current = true
       refreshData()
+      fetchProxyStatus()
     }
   }, [])
 
   useEffect(() => {
     const interval = setInterval(() => {
       useDashboardStore.getState().refreshData()
+      fetchProxyStatus()
     }, 60000)
-    
+
     return () => clearInterval(interval)
-  }, [])
-
-  useEffect(() => {
-    if (proxyStatus) {
-      setProxyEnabled(proxyStatus.isRunning)
-    }
-  }, [proxyStatus, setProxyEnabled])
-
-  useEffect(() => {
-    if (!window.electronAPI?.proxy?.onStatusChanged) return
-    
-    const unsubscribe = window.electronAPI.proxy.onStatusChanged((status) => {
-      useDashboardStore.getState().setProxyStatus(status)
-      setProxyEnabled(status.isRunning)
-    })
-    
-    return unsubscribe
-  }, [setProxyEnabled])
+  }, [fetchProxyStatus])
 
   const handleToggleProxy = useCallback(async () => {
-    if (!window.electronAPI?.proxy) return
-    
     try {
       if (proxyStatus?.isRunning) {
-        await window.electronAPI.proxy.stop()
-        setProxyEnabled(false)
+        await stopProxy()
       } else {
-        await window.electronAPI.proxy.start()
-        setProxyEnabled(true)
+        await startProxy()
       }
       refreshData()
+      fetchProxyStatus()
     } catch (err) {
       console.error('Failed to toggle proxy:', err)
     }
-  }, [proxyStatus, setProxyEnabled, refreshData])
+  }, [proxyStatus, startProxy, stopProxy, refreshData, fetchProxyStatus])
 
   const handleAddAccount = useCallback(() => {
     navigate('/providers')
@@ -100,8 +82,6 @@ export function Dashboard() {
     }
     return `${minutes} ${t('dashboard.minutes')}`
   }
-
-  const isElectron = !!window.electronAPI
 
   return (
     <div className="space-y-6">
@@ -129,13 +109,6 @@ export function Dashboard() {
           </Button>
         </div>
       </div>
-
-      {!isElectron && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400">
-          <p className="font-medium">{t('dashboard.browserMode')}</p>
-          <p>{t('dashboard.browserModeDesc')}</p>
-        </div>
-      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
@@ -188,7 +161,7 @@ export function Dashboard() {
         </div>
         <div>
           <QuickActions
-            proxyRunning={proxyStatus?.isRunning ?? proxyEnabled}
+            proxyRunning={proxyStatus?.isRunning ?? false}
             onToggleProxy={handleToggleProxy}
             onAddAccount={handleAddAccount}
             onViewLogs={handleViewLogs}
