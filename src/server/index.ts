@@ -18,8 +18,6 @@ const router = new Router()
 const server = createServer(app.callback())
 const wss = new WebSocketServer({ server })
 
-initStorage()
-
 app.use(bodyParser())
 app.use(authMiddleware)
 
@@ -92,19 +90,29 @@ wss.on('connection', (ws) => {
 const PORT = process.env.PORT || 3000
 const PROXY_PORT = process.env.PROXY_PORT || 8310
 
-server.listen(PORT, async () => {
-  console.log(`Chat2API Server running at http://localhost:${PORT}`)
-  console.log(`WebSocket: ws://localhost:${PORT}/ws`)
-  
-  try {
-    const { ProxyServer } = await import('../core/proxy/server')
-    const proxyServer = new ProxyServer()
-    await proxyServer.start(Number(PROXY_PORT))
-    setProxyServer(proxyServer)
-    console.log(`Proxy server: http://localhost:${PROXY_PORT}`)
-  } catch (error) {
-    console.error('Failed to start proxy server:', error)
-  }
+// Initialize storage first, then start the server
+async function startServer() {
+  await initStorage()
+
+  server.listen(PORT, async () => {
+    console.log(`Chat2API Server running at http://localhost:${PORT}`)
+    console.log(`WebSocket: ws://localhost:${PORT}/ws`)
+
+    try {
+      const { ProxyServer } = await import('../core/proxy/server')
+      const proxyServer = new ProxyServer()
+      await proxyServer.start(Number(PROXY_PORT))
+      setProxyServer(proxyServer)
+      console.log(`Proxy server: http://localhost:${PROXY_PORT}`)
+    } catch (error) {
+      console.error('Failed to start proxy server:', error)
+    }
+  })
+}
+
+startServer().catch(error => {
+  console.error('Failed to start server:', error)
+  process.exit(1)
 })
 
 process.on('SIGINT', () => {

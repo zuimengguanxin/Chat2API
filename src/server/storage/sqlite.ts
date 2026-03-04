@@ -92,18 +92,22 @@ let SQL: any = null
 export async function initStorage(): Promise<void> {
   const dbPath = getDbPath()
   console.log('Database path:', dbPath)
-  
+
   SQL = await initSqlJs()
-  
+
   if (existsSync(dbPath)) {
     const fileBuffer = readFileSync(dbPath)
     db = new SQL.Database(fileBuffer)
   } else {
     db = new SQL.Database()
   }
-  
+
+  // Patch the database immediately after creation
+  patchDatabase(db)
+
   db.run(`PRAGMA journal_mode = WAL`)
   
+
   db.run(`
     CREATE TABLE IF NOT EXISTS providers (
       id TEXT PRIMARY KEY,
@@ -123,7 +127,7 @@ export async function initStorage(): Promise<void> {
       updated_at INTEGER
     )
   `)
-  
+
   db.run(`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
@@ -141,14 +145,14 @@ export async function initStorage(): Promise<void> {
       FOREIGN KEY (provider_id) REFERENCES providers(id)
     )
   `)
-  
+
   db.run(`
     CREATE TABLE IF NOT EXISTS config (
       key TEXT PRIMARY KEY,
       value TEXT
     )
   `)
-  
+
   db.run(`
     CREATE TABLE IF NOT EXISTS logs (
       id TEXT PRIMARY KEY,
@@ -181,6 +185,8 @@ export async function initStorage(): Promise<void> {
       usage_count INTEGER DEFAULT 0
     )
   `)
+
+  console.log('Tables created successfully')
   
   const defaultConfig = {
     proxyPort: 8310,
@@ -199,8 +205,11 @@ export async function initStorage(): Promise<void> {
   }
   
   for (const [key, value] of Object.entries(defaultConfig)) {
-    const existing = db.exec(`SELECT value FROM config WHERE key = ?`, [key])
-    if (existing.length === 0 || existing[0].values.length === 0) {
+    // Use prepare() for parameterized queries instead of exec()
+    const stmt = db.prepare(`SELECT value FROM config WHERE key = ?`)
+    const existing = stmt.get(key)
+
+    if (!existing) {
       db.run(`INSERT INTO config (key, value) VALUES (?, ?)`, [key, JSON.stringify(value)])
     }
   }
@@ -219,8 +228,8 @@ function saveDatabase(): void {
 
 export function getDb(): SqlJsDatabase {
   if (!db) throw new Error('Database not initialized')
-  // Patch the database object to support better-sqlite3-like API
-  return patchDatabase(db)
+  // Database is already patched during initialization
+  return db
 }
 
 // Patch sql.js Database to support better-sqlite3-like API
@@ -235,38 +244,103 @@ function patchDatabase(database: SqlJsDatabase): any {
 
   // Wrap run() to auto-save after write operations
   database.run = function(sql: string, params?: any[]) {
-    const isWriteStatement = /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
-    const result = originalRun(sql, params || [])
-    if (isWriteStatement) {
-      saveDatabase()
+    const sqlDebug = typeof sql === 'string' ? sql.trim().substring(0, 50) : String(sql)
+    console.log('Running SQL:', sqlDebug)
+    const isWriteStatement = typeof sql === 'string' && /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
+    try {
+      // sql.js run() doesn't support parameters directly
+      // For parametrized queries without placeholders, we can run directly
+      // For parametrized queries with placeholders, use exec()
+      if (params && params.length > 0 && typeof sql === 'string') {
+        // Use exec for queries with parameters
+        // Build the full SQL by replacing placeholders
+        let finalSql = sql
+        if (params.length > 0) {
+          finalSql = sql.replace(/\?/g, (match) => {
+            const param = params.shift()
+            if (typeof param === 'string') {
+              return `'${param.replace(/'/g, "''")}'`
+            } else if (param === null || param === undefined) {
+              return 'NULL'
+            } else {
+              return String(param)
+            }
+          })
+        }
+        originalExec([finalSql])
+      } else {
+        originalRun(sql)
+      }
+
+      if (isWriteStatement) {
+        saveDatabase()
+      }
+
+      return { changes: 1, lastInsertRowid: 0 }
+    } catch (error: any) {
+      console.error('Error running SQL:', error.message)
+      console.error('SQL was:', sql)
+      console.error('Params:', params)
+      throw error
     }
-    return result
   }
 
   // Add prepare method that supports chaining with all()/get()/run()
   (database as any).prepare = function(sql: string) {
-    const stmt = originalPrepare(sql)
-    const isWriteStatement = /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
+    if (!sql || typeof sql !== 'string' || sql.trim() === '') {
+      console.error('Empty SQL statement attempted!')
+      const stack = new Error().stack
+      console.error(stack)
+      throw new Error('Cannot prepare empty SQL statement')
+    }
+
+    console.log('Preparing SQL:', sql.trim())
 
     return {
       all: function(...params: any[]) {
-        stmt.bind(params)
-        const results: any[] = []
-        while (stmt.step()) {
-          results.push(stmt.getAsObject())
+        const stmt = originalPrepare(sql)
+        try {
+          if (params && params.length > 0) {
+            // Handle array binding properly
+            if (Array.isArray(params[0])) {
+              stmt.bind(params[0])
+            } else {
+              stmt.bind(params)
+            }
+          }
+          const results: any[] = []
+          while (stmt.step()) {
+            results.push(stmt.getAsObject())
+          }
+          stmt.free()
+          return results
+        } catch (error) {
+          stmt.free()
+          throw error
         }
-        stmt.free()
-        return results
       },
       get: function(...params: any[]) {
-        stmt.bind(params)
-        if (stmt.step()) {
-          const result = stmt.getAsObject()
+        const stmt = originalPrepare(sql)
+        try {
+          if (params && params.length > 0) {
+            // Handle array binding properly
+            if (Array.isArray(params[0])) {
+              stmt.bind(params[0])
+            } else {
+              stmt.bind(params)
+            }
+          }
+          if (stmt.step()) {
+            const result = stmt.getAsObject()
+            stmt.free()
+            return result
+          }
           stmt.free()
-          return result
+          return null
+        } catch (error) {
+          stmt.free()
+          throw error
         }
-        stmt.free()
-        return null
       },
       run: function(...params: any[]) {
         // Use db.run for write operations

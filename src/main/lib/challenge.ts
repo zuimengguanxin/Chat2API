@@ -1,6 +1,13 @@
 import fs from 'fs'
 import path from 'path'
-import { app } from 'electron'
+import { fileURLToPath } from 'url'
+
+// Get the directory name of the current module
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Find WASM file in project root (go up from src/main/lib to project root)
+const projectRoot = path.resolve(__dirname, '..', '..', '..')
 
 export class DeepSeekHash {
   private wasmInstance: any
@@ -120,10 +127,8 @@ let deepSeekHashInstance: DeepSeekHash | null = null
 export async function getDeepSeekHash(): Promise<DeepSeekHash> {
   if (!deepSeekHashInstance) {
     deepSeekHashInstance = new DeepSeekHash()
-    // Use different paths for development and production environments
-    const wasmPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'sha3_wasm_bg.7b9ca65ddd.wasm')
-      : path.join(app.getAppPath(), 'sha3_wasm_bg.7b9ca65ddd.wasm')
+    // WASM file is located in the project root directory
+    const wasmPath = path.join(projectRoot, 'sha3_wasm_bg.7b9ca65ddd.wasm')
     console.log('[DeepSeekHash] WASM path:', wasmPath)
     console.log('[DeepSeekHash] File exists:', fs.existsSync(wasmPath))
     try {

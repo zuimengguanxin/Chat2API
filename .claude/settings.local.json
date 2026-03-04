@@ -10,7 +10,11 @@
       "Bash(findstr :3000)",
       "Bash(findstr LISTENING)",
       "Bash(taskkill:*)",
-      "Bash(Get-Process:*)"
+      "Bash(Get-Process:*)",
+      "Bash(tasklist:*)",
+      "Bash(cmd:*)",
+      "Bash(timeout 15 npx tsx:*)",
+      "Bash(timeout 20 npx tsx:*)"
     ]
   }
 }

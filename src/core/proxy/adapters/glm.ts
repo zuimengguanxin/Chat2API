@@ -310,7 +310,7 @@ export class GLMAdapter {
 
     const textContent = messages.reduce((acc, msg) => {
       const role = msg.role
-        .replace('system', '„Äêsystem„Ä?)
+        .replace('system', '„Äêsystem„Äë')
         .replace('assistant', ' <|assistant| ')
         .replace('user', ' <|user| ')
       if (typeof msg.content === 'string') {
@@ -563,7 +563,7 @@ export class GLMStreamHandler {
                 if (type === 'text') {
                   let txt = text
                   if (searchMap.size > 0) {
-                    txt = txt.replace(/„Ä?(turn\d+[a-zA-Z]+\d+)„Ä?/g, (match: string, key: string) => {
+                    txt = txt.replace(/ÔøΩ?(turn\d+[a-zA-Z]+\d+)ÔøΩ?/g, (match: string, key: string) => {
                       const searchInfo = searchMap.get(key)
                       if (!searchInfo) return match
                       if (!keyToIdMap.has(key)) {
@@ -709,7 +709,7 @@ export class GLMStreamHandler {
                   if (type === 'text') {
                     let txt = text
                     if (searchMap.size > 0) {
-                      txt = txt.replace(/„Ä?(turn\d+[a-zA-Z]+\d+)„Ä?/g, (match: string, key: string) => {
+                      txt = txt.replace(/ÔøΩ?(turn\d+[a-zA-Z]+\d+)ÔøΩ?/g, (match: string, key: string) => {
                         const searchInfo = searchMap.get(key)
                         if (!searchInfo) return match
                         if (!keyToIdMap.has(key)) {

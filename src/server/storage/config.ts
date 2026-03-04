@@ -37,9 +37,8 @@ export const ConfigManager = {
 
   set(config: Partial<AppConfig>): void {
     const db = getDb()
-    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)')
     for (const [key, value] of Object.entries(config)) {
-      stmt.run(key, JSON.stringify(value))
+      db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, JSON.stringify(value))
     }
   },
 
