@@ -648,6 +648,7 @@
     "selectLoginMethod": "Select login method to get access credentials",
     "manualInput": "Manual Input",
     "browserLogin": "Browser Login",
+    "browserExtract": "Browser Extract",
     "tokenStoredLocally": "Token is stored locally only, not uploaded to server",
     "clickToOpenBrowser": "Click the button below to open browser for login, after successful login please follow the instructions to get Token",
     "openLoginPage": "Open {{provider}} Login Page",
@@ -671,7 +672,38 @@
     "failed": "Failed",
     "cancelled": "Cancelled",
     "loginTimeout": "Login timeout, please try again",
-    "help": "Help"
+    "help": "Help",
+    "chooseLoginMethod": "Choose login method",
+    "steps": {
+      "title": "Instructions",
+      "loginTo": "Visit {{provider}} and login",
+      "openDevTools": "Open browser Developer Tools (F12)",
+      "findToken": "Find and copy Token value",
+      "pasteBelow": "Paste Token below",
+      "getCookie": "Get tongyi_sso_ticket from Cookies",
+      "openBrowser": "Open login page in browser"
+    },
+    "autoExtractScript": "Auto Extract Script",
+    "show": "Show",
+    "hide": "Hide",
+    "extractedToken": "Extracted Token",
+    "pasteExtractedToken": "Paste extracted Token from browser",
+    "extractedTokenDesc": "Copy and paste this script in browser DevTools console, then run to auto-extract and copy Token",
+    "extractAndValidate": "Extract & Validate",
+    "extracting": "Extracting...",
+    "extractingCredentials": "Extracting credentials...",
+    "extractionSuccess": "Extraction successful",
+    "extractionFailed": "Extraction failed",
+    "callback": {
+      "title": {
+        "loading": "Processing...",
+        "success": "OAuth Login Success",
+        "error": "OAuth Login Failed"
+      },
+      "success": "{{provider}} login verification successful",
+      "invalid": "Invalid OAuth callback request",
+      "backToProviders": "Back to Providers"
+    }
   },
   "models": {
     "title": "Model Management",

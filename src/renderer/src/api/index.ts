@@ -64,9 +64,19 @@ export const api = {
   },
   apiKeys: {
     getAll: () => apiClient.get('/api-keys').then(r => r.data),
-    create: (data: { name: string; description?: string }) => 
+    create: (data: { name: string; description?: string }) =>
       apiClient.post('/api-keys', data).then(r => r.data),
     update: (id: string, data: unknown) => apiClient.put(`/api-keys/${id}`, data).then(r => r.data),
     delete: (id: string) => apiClient.delete(`/api-keys/${id}`).then(r => r.data),
+  },
+  oauth: {
+    start: (providerId: string, providerType: string) =>
+      apiClient.get('/oauth/start', { params: { providerId, providerType } }).then(r => r.data),
+    getSession: (state: string) =>
+      apiClient.get(`/oauth/session/${state}`).then(r => r.data),
+    cancelSession: (state: string) =>
+      apiClient.delete(`/oauth/session/${state}`).then(r => r.data),
+    extractCredentials: (providerType: string, data: Record<string, string>) =>
+      apiClient.post('/oauth/extract', { providerType, data }).then(r => r.data),
   },
 }

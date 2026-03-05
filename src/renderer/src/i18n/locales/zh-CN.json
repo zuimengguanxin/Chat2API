@@ -648,6 +648,7 @@
     "selectLoginMethod": "选择登录方式以获取访问凭证",
     "manualInput": "手动输入",
     "browserLogin": "浏览器登录",
+    "browserExtract": "浏览器提取",
     "tokenStoredLocally": "Token 仅存储在本地，不会上传到服务器",
     "clickToOpenBrowser": "点击下方按钮打开浏览器进行登录，登录成功后请按照说明获取 Token",
     "openLoginPage": "打开 {{provider}} 登录页面",
@@ -671,7 +672,38 @@
     "failed": "失败",
     "cancelled": "已取消",
     "loginTimeout": "登录超时，请重试",
-    "help": "帮助"
+    "help": "帮助",
+    "chooseLoginMethod": "请选择登录方式",
+    "steps": {
+      "title": "操作步骤",
+      "loginTo": "访问 {{provider}} 并登录",
+      "openDevTools": "打开浏览器开发者工具 (F12)",
+      "findToken": "查找并复制 Token 值",
+      "pasteBelow": "在下方粘贴 Token",
+      "getCookie": "从 Cookies 获取 tongyi_sso_ticket",
+      "openBrowser": "在浏览器中打开登录页面"
+    },
+    "autoExtractScript": "自动提取脚本",
+    "show": "显示",
+    "hide": "隐藏",
+    "extractedToken": "提取到的 Token",
+    "pasteExtractedToken": "粘贴从浏览器提取到的 Token",
+    "extractedTokenDesc": "将此脚本粘贴到浏览器开发者工具控制台执行，可以自动提取并复制 Token",
+    "extractAndValidate": "提取并验证",
+    "extracting": "提取中...",
+    "extractingCredentials": "正在提取凭证...",
+    "extractionSuccess": "提取成功",
+    "extractionFailed": "提取失败",
+    "callback": {
+      "title": {
+        "loading": "处理中...",
+        "success": "OAuth 登录成功",
+        "error": "OAuth 登录失败"
+      },
+      "success": "{{provider}} 登录验证成功",
+      "invalid": "无效的 OAuth 回调请求",
+      "backToProviders": "返回供应商列表"
+    }
   },
   "models": {
     "title": "模型管理",

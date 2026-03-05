@@ -29,8 +29,8 @@ import {
 import type { Provider, CredentialField, Account, BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
 import { api } from '@/api'
 
-// NOTE: OAuth login is not supported in Web version
-const supportsOAuth = false
+// OAuth is supported via browser extraction
+const supportsOAuth = true
 
 /**
  * Map OAuth credentials to provider credential field names

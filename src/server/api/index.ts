@@ -5,6 +5,7 @@ import { createProxyRouter } from './proxy'
 import { createLogsRouter } from './logs'
 import { createConfigRouter } from './config'
 import { createApiKeysRouter } from './apikeys'
+import { createOAuthRouter } from './oauth'
 
 export function registerRoutes(router: Router) {
   router.use('/api/providers', createProvidersRouter().routes())
@@ -13,4 +14,5 @@ export function registerRoutes(router: Router) {
   router.use('/api/logs', createLogsRouter().routes())
   router.use('/api/config', createConfigRouter().routes())
   router.use('/api/api-keys', createApiKeysRouter().routes())
+  router.use('/api/oauth', createOAuthRouter().routes())
 }

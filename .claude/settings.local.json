@@ -14,7 +14,9 @@
       "Bash(tasklist:*)",
       "Bash(cmd:*)",
       "Bash(timeout 15 npx tsx:*)",
-      "Bash(timeout 20 npx tsx:*)"
+      "Bash(timeout 20 npx tsx:*)",
+      "WebSearch",
+      "Bash(npx tsc:*)"
     ]
   }
 }
