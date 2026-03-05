@@ -728,16 +728,8 @@ export class MiniMaxAdapter {
     let pollCount = 0
     const maxPolls = 60
     const pollInterval = 500
-    
-    transStream.write(
-      `data: ${JSON.stringify({
-        id: '',
-        model,
-        object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-        created,
-      })}\n\n`
-    )
+    const toolCallState = createToolCallState()
+    let sentRole = false
     
     const poll = async () => {
       try {
@@ -772,27 +764,45 @@ export class MiniMaxAdapter {
             
             if (currentContent.length > lastContent.length) {
               const newChunk = currentContent.substring(lastContent.length)
-              transStream.write(
-                `data: ${JSON.stringify({
-                  id: chatId.toString(),
-                  model,
-                  object: 'chat.completion.chunk',
-                  choices: [{ index: 0, delta: { content: newChunk }, finish_reason: null }],
-                  created,
-                })}\n\n`
+              
+              // Process tool call interception
+              const baseChunk = createBaseChunk(chatId.toString(), model, created)
+              const { chunks: outputChunks } = processStreamContent(
+                newChunk, 
+                toolCallState, 
+                baseChunk, 
+                !sentRole,
+                'minimax'
               )
+
+              for (const outChunk of outputChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+              }
+
+              if (outputChunks.length > 0) sentRole = true
+              
               lastContent = currentContent
             }
             
             if (pollCount > 5 && currentContent === lastContent && lastContent.length > 0) {
               console.log('[MiniMax] Stream completed after', pollCount, 'polls, content length:', lastContent.length)
               
+              // Flush any remaining tool calls
+              const baseChunk = createBaseChunk(chatId.toString(), model, created)
+              const flushChunks = flushToolCallBuffer(toolCallState, baseChunk, 'minimax')
+              
+              for (const outChunk of flushChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+              }
+              
+              const finishReason = toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+              
               transStream.write(
                 `data: ${JSON.stringify({
                   id: chatId.toString(),
                   model,
                   object: 'chat.completion.chunk',
-                  choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                  choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
                   created,
                 })}\n\n`
               )
@@ -900,11 +910,14 @@ export class MiniMaxStreamHandler {
   private model: string
   private created: number
   private onEnd?: (chatId: string) => void
+  private toolCallState: ToolCallState
+  private sentRole: boolean = false
 
   constructor(model: string, onEnd?: (chatId: string) => void) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolCallState = createToolCallState()
   }
 
   setChatId(chatId: string) {
@@ -948,16 +961,6 @@ export class MiniMaxStreamHandler {
       }
     })
 
-    transStream.write(
-      `data: ${JSON.stringify({
-        id: '',
-        model: this.model,
-        object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-        created: this.created,
-      })}\n\n`
-    )
-
     // Use SSE parser for event stream format
     const parser = createParser({
       onEvent: (event: EventSourceMessage) => {
@@ -972,12 +975,21 @@ export class MiniMaxStreamHandler {
           const { type, base_resp, statusInfo, data: _data } = result
 
           if (type === 8) {
+            // Flush any remaining tool calls
+            const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
+            const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'minimax')
+            
+            for (const outChunk of flushChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+            }
+            
+            const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
             transStream.write(
               `data: ${JSON.stringify({
                 id: this.chatId,
                 model: this.model,
                 object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
                 created: this.created,
               })}\n\n`
             )
@@ -1012,16 +1024,40 @@ export class MiniMaxStreamHandler {
 
             console.log('[MiniMax] Stream chunk:', chunk.substring(0, 50), 'isEnd:', isEnd)
 
-            transStream.write(
-              `data: ${JSON.stringify({
-                id: this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content: chunk }, finish_reason: isEnd === 0 ? 'stop' : null }],
-                created: this.created,
-              })}\n\n`
+            // Process tool call interception
+            const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
+            const { chunks: outputChunks } = processStreamContent(
+              chunk, 
+              this.toolCallState, 
+              baseChunk, 
+              !this.sentRole,
+              'minimax'
             )
+
+            for (const outChunk of outputChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+            }
+
+            if (outputChunks.length > 0) this.sentRole = true
+
             if (isEnd === 0) {
+              // Flush any remaining tool calls
+              const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'minimax')
+              
+              for (const outChunk of flushChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+              }
+              
+              const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+              transStream.write(
+                `data: ${JSON.stringify({
+                  id: this.chatId,
+                  model: this.model,
+                  object: 'chat.completion.chunk',
+                  choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+                  created: this.created,
+                })}\n\n`
+              )
               transStream.end('data: [DONE]\n\n')
               if (this.onEnd) this.onEnd(this.chatId)
             }

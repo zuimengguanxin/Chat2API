@@ -751,31 +751,23 @@ export class GLMStreamHandler {
             const chunk = fullText.substring(sentContent.length)
             if (chunk) {
               sentContent += chunk
-
-              // Process tool call interception
-              const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
-              const { chunks: outputChunks } = processStreamContent(
-                chunk, 
-                this.toolCallState, 
-                baseChunk, 
-                !sentRole,
-                'glm'
-              )
-
-              // Check if we emitted tool calls first
-              const hasToolCalls = outputChunks.some(c => c.choices?.[0]?.delta?.tool_calls)
-
-              for (const outChunk of outputChunks) {
-                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
-              }
-
-              // If we emitted tool calls, skip regular content output
-              if (hasToolCalls) {
-                // Tool calls emitted, skipping regular content
-              }
-
-              if (outputChunks.length > 0) sentRole = true
             }
+            
+            // Process tool call interception - use toolCallState's buffer for accumulation
+            const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
+            const { chunks: outputChunks, isBuffering } = processStreamContent(
+              chunk, 
+              this.toolCallState, 
+              baseChunk, 
+              !sentRole,
+              'glm'
+            )
+
+            for (const outChunk of outputChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+            }
+
+            if (outputChunks.length > 0) sentRole = true
           } else {
             // Flush any remaining tool call buffer before finishing
             const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)

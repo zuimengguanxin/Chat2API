@@ -10,6 +10,14 @@ import { createParser } from 'eventsource-parser'
 import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { parseToolCallsFromText } from '../utils/toolParser'
+import { 
+  createToolCallState, 
+  processStreamContent, 
+  flushToolCallBuffer,
+  createBaseChunk,
+  ToolCallState 
+} from '../utils/streamToolHandler'
 
 const ZAI_API_BASE = 'https://chat.z.ai'
 const X_FE_VERSION = 'prod-fe-1.0.241'
@@ -485,11 +493,14 @@ export class ZaiStreamHandler {
   private content: string = ''
   private toolCallsSent: boolean = false
   private lastMessageId: string = ''
+  private toolCallState: ToolCallState
+  private sentRole: boolean = false
 
   constructor(model: string, onEnd?: (chatId: string) => void) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolCallState = createToolCallState()
   }
 
   setChatId(chatId: string) {
@@ -562,16 +573,6 @@ export class ZaiStreamHandler {
 
     console.log('[Z.ai] Starting stream handler...')
 
-    transStream.write(
-      `data: ${JSON.stringify({
-        id: '',
-        model: this.model,
-        object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-        created: this.created,
-      })}\n\n`
-    )
-
     const parser = createParser({
       onEvent: (event: any) => {
         try {
@@ -592,24 +593,35 @@ export class ZaiStreamHandler {
 
           if (result.phase === 'answer' && result.delta_content) {
             this.content += result.delta_content
-            transStream.write(
-              `data: ${JSON.stringify({
-                id: this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content: result.delta_content }, finish_reason: null }],
-                created: this.created,
-              })}\n\n`
+            
+            // Process tool call interception
+            const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
+            const { chunks: outputChunks } = processStreamContent(
+              result.delta_content, 
+              this.toolCallState, 
+              baseChunk, 
+              !this.sentRole,
+              'zai'
             )
+
+            for (const outChunk of outputChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+            }
+
+            if (outputChunks.length > 0) this.sentRole = true
           } else if (result.phase === 'done' && result.done) {
             console.log('[Z.ai] Stream finished, content length:', this.content.length)
             
-            // Check for tool calls before sending stop
-            if (hasToolUse(this.content)) {
-              console.log('[Z.ai] Found tool_use in stream, sending tool_calls')
-              this.sendToolCalls(transStream)
-              return
+            // Flush any remaining tool calls
+            const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
+            const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'zai')
+            
+            for (const outChunk of flushChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
             }
+            
+            // Check if we emitted tool calls
+            const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
             
             const usage = result.usage || { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
             
@@ -618,7 +630,7 @@ export class ZaiStreamHandler {
                 id: this.chatId,
                 model: this.model,
                 object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
                 usage,
                 created: this.created,
               })}\n\n`

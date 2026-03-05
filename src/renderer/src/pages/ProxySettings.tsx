@@ -33,26 +33,26 @@ export function ProxySettings() {
       </div>
 
       <Tabs defaultValue="status" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 h-auto">
-          <TabsTrigger value="status" className="flex items-center gap-2 py-2">
-            <Activity className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('proxy.statusMonitoring')}</span>
+        <TabsList className="flex flex-wrap w-full gap-1 h-auto p-1">
+          <TabsTrigger value="status" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <Activity className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('proxy.statusMonitoring')}</span>
           </TabsTrigger>
-          <TabsTrigger value="basic" className="flex items-center gap-2 py-2">
-            <Settings className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('proxy.basicConfig')}</span>
+          <TabsTrigger value="basic" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <Settings className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('proxy.basicConfig')}</span>
           </TabsTrigger>
-          <TabsTrigger value="loadbalance" className="flex items-center gap-2 py-2">
-            <Scale className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('proxy.loadBalancing')}</span>
+          <TabsTrigger value="loadbalance" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <Scale className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('proxy.loadBalancing')}</span>
           </TabsTrigger>
-          <TabsTrigger value="session" className="flex items-center gap-2 py-2">
-            <MessageSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('session.title')}</span>
+          <TabsTrigger value="session" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <MessageSquare className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('session.title')}</span>
           </TabsTrigger>
-          <TabsTrigger value="advanced" className="flex items-center gap-2 py-2">
-            <Settings2 className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('proxy.advancedConfig')}</span>
+          <TabsTrigger value="advanced" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <Settings2 className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('proxy.advancedConfig')}</span>
           </TabsTrigger>
         </TabsList>
 

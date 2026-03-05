@@ -12,7 +12,6 @@ export const TOOL_PROMPT_SIGNATURES = [
   '## Available Tools',
   '## Tool Call Protocol',
   '[function_calls]',
-  '<tool_use>',
   'TOOL_WRAP_HINT',
   'You can invoke the following developer tools',
   'Tool Call Formatting',

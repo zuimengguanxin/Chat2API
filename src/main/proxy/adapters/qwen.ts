@@ -13,6 +13,13 @@ import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { 
+  createToolCallState, 
+  processStreamContent, 
+  flushToolCallBuffer,
+  createBaseChunk,
+  ToolCallState 
+} from '../utils/streamToolHandler'
 
 /**
  * Check if content contains tool calls (both bracket and XML formats)
@@ -308,11 +315,14 @@ export class QwenStreamHandler {
   private stopSent: boolean = false
   private toolCallsSent: boolean = false
   private hasError: boolean = false
+  private toolCallState: ToolCallState
+  private sentRole: boolean = false
 
   constructor(model: string, onEnd?: (sessionId: string) => void) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolCallState = createToolCallState()
   }
 
   hasSessionError(): boolean {
@@ -380,16 +390,6 @@ export class QwenStreamHandler {
     const contentEncoding = response?.headers?.['content-encoding']
     console.log('[Qwen] Content-Encoding:', contentEncoding)
 
-    transStream.write(
-      `data: ${JSON.stringify({
-        id: '',
-        model: this.model,
-        object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-        created: this.created,
-      })}\n\n`
-    )
-
     let buffer = ''
 
     const processBuffer = () => {
@@ -443,15 +443,21 @@ export class QwenStreamHandler {
                     this.content = newContent
                     console.log('[Qwen] Writing chunk, length:', chunk.length)
 
-                    transStream.write(
-                      `data: ${JSON.stringify({
-                        id: this.responseId || this.sessionId,
-                        model: this.model,
-                        object: 'chat.completion.chunk',
-                        choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }],
-                        created: this.created,
-                      })}\n\n`
+                    // Process tool call interception
+                    const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
+                    const { chunks: outputChunks } = processStreamContent(
+                      chunk, 
+                      this.toolCallState, 
+                      baseChunk, 
+                      !this.sentRole,
+                      'qwen'
                     )
+
+                    for (const outChunk of outputChunks) {
+                      transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+                    }
+
+                    if (outputChunks.length > 0) this.sentRole = true
                     console.log('[Qwen] Chunk written to stream')
                   } else {
                     console.log('[Qwen] Skipping - no new content')
@@ -464,19 +470,23 @@ export class QwenStreamHandler {
                     this.stopSent = true
                     console.log('[Qwen] Sending stop for multi_load/iframe, content so far:', this.content.length)
                     
-                    // Check for tool calls before sending stop
-                    if (hasToolCalls(this.content)) {
-                      console.log('[Qwen] Found tool_use in stream, sending tool_calls')
-                      this.sendToolCalls(transStream)
-                      return
+                    // Flush any remaining tool calls
+                    const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
+                    const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'qwen')
+                    
+                    for (const outChunk of flushChunks) {
+                      transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
                     }
+                    
+                    // Check if we emitted tool calls
+                    const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
                     
                     transStream.write(
                       `data: ${JSON.stringify({
                         id: this.responseId || this.sessionId,
                         model: this.model,
                         object: 'chat.completion.chunk',
-                        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                        choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
                         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
                         created: this.created,
                       })}\n\n`
@@ -512,19 +522,23 @@ export class QwenStreamHandler {
           if (!transStream.closed && !this.stopSent) {
             this.stopSent = true
             
-            // Check for tool calls before sending stop
-            if (hasToolCalls(this.content)) {
-              console.log('[Qwen] Found tool_use in complete event, sending tool_calls')
-              this.sendToolCalls(transStream)
-              return
+            // Flush any remaining tool calls
+            const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
+            const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'qwen')
+            
+            for (const outChunk of flushChunks) {
+              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
             }
+            
+            // Check if we emitted tool calls
+            const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
             
             transStream.write(
               `data: ${JSON.stringify({
                 id: this.responseId || this.sessionId,
                 model: this.model,
                 object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
                 usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
                 created: this.created,
               })}\n\n`
@@ -594,7 +608,18 @@ export class QwenStreamHandler {
     console.log('[Qwen] Starting non-stream handler...')
 
     return new Promise((resolve, reject) => {
-      const data = {
+      const data: {
+        id: string
+        model: string
+        object: string
+        choices: Array<{
+          index: number
+          message: { role: string; content: string | null; tool_calls?: any[] }
+          finish_reason: string
+        }>
+        usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+        created: number
+      } = {
         id: '',
         model: this.model,
         object: 'chat.completion',
@@ -612,6 +637,17 @@ export class QwenStreamHandler {
       let contentAccumulator = ''
       let buffer = ''
       let resolved = false
+
+      const finalizeWithData = (content: string) => {
+        const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'qwen')
+        if (toolCalls.length > 0) {
+          data.choices[0].message.content = null
+          data.choices[0].message.tool_calls = toolCalls
+          data.choices[0].finish_reason = 'tool_calls'
+        } else {
+          data.choices[0].message.content = cleanContent.trim()
+        }
+      }
 
       const processBuffer = () => {
         while (true) {
@@ -663,8 +699,19 @@ export class QwenStreamHandler {
                   if (msg.status === 'complete' || msg.status === 'finished') {
                     if (msg.mime_type === 'multi_load/iframe') {
                       console.log('[Qwen] Non-stream finished, content length:', contentAccumulator.length)
-                      data.choices[0].message.content = contentAccumulator
                       this.content = contentAccumulator
+                      
+                      // Parse tool calls from content
+                      const { content: cleanContent, toolCalls } = parseToolCallsFromText(contentAccumulator, 'qwen')
+                      
+                      if (toolCalls.length > 0) {
+                        data.choices[0].message.content = null
+                        ;(data.choices[0].message as any).tool_calls = toolCalls
+                        data.choices[0].finish_reason = 'tool_calls'
+                      } else {
+                        data.choices[0].message.content = cleanContent.trim()
+                      }
+                      
                       this.onEnd?.(this.sessionId)
                       resolved = true
                       resolve(data)
@@ -680,8 +727,8 @@ export class QwenStreamHandler {
 
           if (eventType === 'complete' && !resolved) {
             console.log('[Qwen] Non-stream complete event, content length:', contentAccumulator.length)
-            data.choices[0].message.content = contentAccumulator
             this.content = contentAccumulator
+            finalizeWithData(contentAccumulator)
             resolved = true
             resolve(data)
             return
@@ -715,8 +762,8 @@ export class QwenStreamHandler {
               buffer = decompressedStr
               processBuffer()
               console.log('[Qwen] Zstd non-stream finished, content length:', contentAccumulator.length)
-              data.choices[0].message.content = contentAccumulator
               this.content = contentAccumulator
+              finalizeWithData(contentAccumulator)
               resolve(data)
             })
           } catch (err) {
@@ -743,8 +790,8 @@ export class QwenStreamHandler {
         console.log('[Qwen] Non-stream closed, content length:', contentAccumulator.length)
         if (!resolved) {
           processBuffer()
-          data.choices[0].message.content = contentAccumulator
           this.content = contentAccumulator
+          finalizeWithData(contentAccumulator)
           resolve(data)
         }
       })
@@ -752,8 +799,8 @@ export class QwenStreamHandler {
         console.log('[Qwen] Non-stream ended, content length:', contentAccumulator.length)
         if (!resolved) {
           processBuffer()
-          data.choices[0].message.content = contentAccumulator
           this.content = contentAccumulator
+          finalizeWithData(contentAccumulator)
           resolve(data)
         }
       })
