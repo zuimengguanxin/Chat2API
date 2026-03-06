@@ -801,10 +801,10 @@ export class RequestForwarder {
   private buildHeaders(provider: Provider, account: Account): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...provider.headers,
+      ...(provider.headers || {}),
     }
 
-    const credentials = account.credentials
+    const credentials = account.credentials || {}
 
     if (credentials.token) {
       headers['Authorization'] = `Bearer ${credentials.token}`

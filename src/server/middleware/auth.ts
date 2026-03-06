@@ -67,6 +67,16 @@ export async function authMiddleware(ctx: Context, next: Next) {
 
 const sessionTokens = new Map<string, number>()
 
+// Periodic cleanup of expired sessions (every hour)
+setInterval(() => {
+  const now = Date.now()
+  for (const [token, expiry] of sessionTokens.entries()) {
+    if (now > expiry) {
+      sessionTokens.delete(token)
+    }
+  }
+}, 60 * 60 * 1000)
+
 function validateSessionToken(token: string): boolean {
   const expiry = sessionTokens.get(token)
   if (!expiry) return false

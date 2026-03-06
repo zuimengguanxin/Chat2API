@@ -31,7 +31,9 @@ export function createAuthRouter() {
     const token = createSession()
     ctx.cookies.set(AUTH_COOKIE_NAME, token, { 
       httpOnly: true, 
-      maxAge: 7 * 24 * 60 * 60 * 1000 
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      domain: 'localhost',
+      path: '/'
     })
     ctx.body = { success: true }
   })
@@ -48,7 +50,9 @@ export function createAuthRouter() {
     const token = createSession()
     ctx.cookies.set(AUTH_COOKIE_NAME, token, { 
       httpOnly: true, 
-      maxAge: 7 * 24 * 60 * 60 * 1000 
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      domain: 'localhost',
+      path: '/'
     })
     ctx.body = { success: true }
   })

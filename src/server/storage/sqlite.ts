@@ -102,12 +102,9 @@ export async function initStorage(): Promise<void> {
     db = new SQL.Database()
   }
 
-  // Patch the database immediately after creation
-  patchDatabase(db)
-
-  db.run(`PRAGMA journal_mode = WAL`)
+  // Note: sql.js is an in-memory database, WAL mode is not supported
+  // Create tables BEFORE patching to ensure native sql.js methods work correctly
   
-
   db.run(`
     CREATE TABLE IF NOT EXISTS providers (
       id TEXT PRIMARY KEY,
@@ -186,6 +183,9 @@ export async function initStorage(): Promise<void> {
     )
   `)
 
+  // Patch the database after table creation
+  patchDatabase(db)
+
   console.log('Tables created successfully')
   
   const defaultConfig = {
@@ -244,30 +244,29 @@ function patchDatabase(database: SqlJsDatabase): any {
 
   // Wrap run() to auto-save after write operations
   database.run = function(sql: string, params?: any[]) {
-    const sqlDebug = typeof sql === 'string' ? sql.trim().substring(0, 50) : String(sql)
+    // Validate sql parameter - if it's not a string, it might be an internal sql.js call
+    // In that case, delegate to the original run method
+    if (typeof sql !== 'string') {
+      console.log('Non-string SQL parameter detected, using original run()')
+      return originalRun.call(database, sql)
+    }
+    
+    const sqlDebug = sql.trim().substring(0, 50)
     console.log('Running SQL:', sqlDebug)
-    const isWriteStatement = typeof sql === 'string' && /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql)
+    const isWriteStatement = /^(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)/i.test(sql.trim())
     try {
       // sql.js run() doesn't support parameters directly
-      // For parametrized queries without placeholders, we can run directly
-      // For parametrized queries with placeholders, use exec()
-      if (params && params.length > 0 && typeof sql === 'string') {
-        // Use exec for queries with parameters
-        // Build the full SQL by replacing placeholders
-        let finalSql = sql
-        if (params.length > 0) {
-          finalSql = sql.replace(/\?/g, (match) => {
-            const param = params.shift()
-            if (typeof param === 'string') {
-              return `'${param.replace(/'/g, "''")}'`
-            } else if (param === null || param === undefined) {
-              return 'NULL'
-            } else {
-              return String(param)
-            }
-          })
+      // Use prepare + bind + step for safe parameterized queries
+      if (params && params.length > 0) {
+        const stmt = originalPrepare(sql)
+        try {
+          stmt.bind(params)
+          stmt.step()
+          stmt.free()
+        } catch (e) {
+          stmt.free()
+          throw e
         }
-        originalExec([finalSql])
       } else {
         originalRun(sql)
       }
