@@ -16,7 +16,8 @@
       "Bash(timeout 15 npx tsx:*)",
       "Bash(timeout 20 npx tsx:*)",
       "WebSearch",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(sqlite3:*)"
     ]
   }
 }

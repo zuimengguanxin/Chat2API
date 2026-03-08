@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { MainLayout } from '@/components/layout/MainLayout'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { Dashboard } from '@/pages/Dashboard'
 import { Providers } from '@/pages/Providers'
 import { ProxySettings } from '@/pages/ProxySettings'
@@ -16,7 +17,11 @@ function App() {
     <>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route element={<MainLayout />}>
+        <Route element={
+          <ProtectedRoute>
+            <MainLayout />
+          </ProtectedRoute>
+        }>
           <Route path="/" element={<Dashboard />} />
           <Route path="/providers" element={<Providers />} />
           <Route path="/proxy" element={<ProxySettings />} />

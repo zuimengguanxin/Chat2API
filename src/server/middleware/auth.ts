@@ -16,13 +16,21 @@ function generateToken(): string {
 export function isPasswordSet(): boolean {
   const db = getDb()
   const row = db.prepare('SELECT password_hash FROM auth WHERE id = 1').get() as any
-  return !!row?.password_hash
+  const hasPassword = !!row?.password_hash
+  console.log('isPasswordSet check result:', hasPassword)
+  return hasPassword
 }
 
 export function setPassword(password: string): void {
   const db = getDb()
   const hash = hashPassword(password)
-  db.prepare('INSERT OR REPLACE INTO auth (id, password_hash) VALUES (1, ?)').run(hash)
+  console.log('Setting password, hash length:', hash.length)
+  const result = db.prepare('INSERT OR REPLACE INTO auth (id, password_hash) VALUES (1, ?)').run(hash)
+  console.log('Password set result:', result)
+
+  // 验证密码是否真的被保存了
+  const verification = db.prepare('SELECT password_hash FROM auth WHERE id = 1').get() as any
+  console.log('Verification check - password exists after set:', !!verification?.password_hash)
 }
 
 export function verifyPassword(password: string): boolean {
@@ -34,6 +42,7 @@ export function verifyPassword(password: string): boolean {
 
 const publicPaths = [
   '/api/auth/status',
+  '/api/auth/verify',
   '/api/auth/setup',
   '/api/auth/login',
 ]
@@ -77,7 +86,7 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000)
 
-function validateSessionToken(token: string): boolean {
+export function validateSessionToken(token: string): boolean {
   const expiry = sessionTokens.get(token)
   if (!expiry) return false
   if (Date.now() > expiry) {

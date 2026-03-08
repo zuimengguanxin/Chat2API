@@ -14,10 +14,12 @@ export function Login() {
 
   useEffect(() => {
     api.auth.status().then((res) => {
-      if (!res.hasPassword) {
-        setIsSetup(true)
-      }
-    }).catch(() => {})
+      console.log('Auth status check:', res)
+      // 明确设置isSetup状态
+      setIsSetup(!res.hasPassword)
+    }).catch((err) => {
+      console.error('Auth status check failed:', err)
+    })
   }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,13 +28,18 @@ export function Login() {
     setLoading(true)
 
     try {
+      console.log('Submitting form, isSetup:', isSetup)
       if (isSetup) {
-        await api.auth.setup(password)
+        const setupResult = await api.auth.setup(password)
+        console.log('Setup result:', setupResult)
       } else {
-        await api.auth.login(password)
+        const loginResult = await api.auth.login(password)
+        console.log('Login result:', loginResult)
       }
+      console.log('Navigating to /...')
       navigate('/')
     } catch (err: any) {
+      console.error('Submit error:', err)
       setError(err.response?.data?.error || 'Failed')
     } finally {
       setLoading(false)

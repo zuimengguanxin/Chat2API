@@ -6,6 +6,7 @@ export { wsClient }
 export const api = {
   auth: {
     status: () => apiClient.get('/auth/status').then(r => r.data),
+    verify: () => apiClient.get('/auth/verify').then(r => r.data),
     setup: (password: string) => apiClient.post('/auth/setup', { password }).then(r => r.data),
     login: (password: string) => apiClient.post('/auth/login', { password }).then(r => r.data),
     logout: () => apiClient.post('/auth/logout').then(r => r.data),
